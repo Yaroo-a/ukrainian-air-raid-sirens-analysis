@@ -1,0 +1,7 @@
+{
+  "Historical Lookup": 0.0741772151898734,
+  "LogReg (No Spatial)": 0.4851677852348993,
+  "LogReg (With Spatial)": 0.5128859060402684,
+  "LightGBM (No Spatial)": 0.09315436241610738,
+  "LightGBM (With Spatial)": 0.09711409395973153
+}
