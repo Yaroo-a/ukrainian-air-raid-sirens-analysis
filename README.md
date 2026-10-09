@@ -52,6 +52,23 @@
 * Для 49 сухопутних кордонів побудовано матрицю взаємних затримок.
 * Суміжні області демонструють високу скоординованість ($r \in [0.45, 0.71]$), а для транзитних коридорів зафіксовано випередження в **10–20 хвилин** (наприклад, Хмельницька ➔ Вінницька $r = 0.446$, Черкаська ➔ Кіровоградська $r = 0.595$).
 
+### 4. Етап 2: Прогнозування початку тривог (Machine Learning)
+* **Постановка задачі:** Прогнозування початку нової тривоги ($t \to t+1$ год) у періоди тиші з усуненням Data Leakage (Strict Chronological Split, Embargo 2h, One-hot clusters).
+* **Порівняння з бейзлайнами на Test (2025–2026):**
+  * **Naive Persistence ($F_2 = 0.212$):** низька здатність передбачати зміну стану.
+  * **Historical Lookup Table ($F_2 = 0.159$, $\text{PR-AUC} = 0.040$):** колапс статичних імовірностей через зміну характеру атак у 2025–2026 роках (Precision лише $3.8\%$).
+  * **LightGBM (Full Spatial) ($F_2 = 0.359$, $\text{PR-AUC} = 0.204$):**
+    * **Lift у $F_2$-Score:** **$+124.8\%$** над бейзлайном.
+    * **Lift у PR-AUC:** **$+408.0\%$** (у 5 разів краще за таблицю шансів).
+    * Brier Score = **0.0217** (найкраще калібрування).
+* **Внесок просторових ознак (Ablation Study):**
+  * Додавання лагів сусідів підвищує PR-AUC на валідації з $0.234$ до **$0.248$**, а для лінійної моделі — з $0.179$ до **$0.201$** (+12.8%).
+  * Долає «Парадокс Закарпаття», потроюючи повноту виявлення загроз у глибокому тилу з $1.37\%$ до **$4.11\%$**.
+* **Feature Importance (Gain):**
+  1. `burden_last_24h` (інтенсивність атак за останню добу) — найсильніший предиктор (Gain 134k).
+  2. `cluster_3_front` (географічна зона фронту) — Gain 67.5k.
+  3. Сукупні просторові лаги сусідів (`neighbors_active_count` тощо) — Gain >37k (вище за окремі дні тижня та компоненти годин).
+
 ---
 
 ## 🚀 Швидкий старт (Quickstart)
@@ -71,10 +88,18 @@ jupyter lab
 * `02_rq1_temporal_cyclicity.ipynb` — добова/тижнева циклічність та Kruskal-Wallis.
 * `03_rq2_regional_clustering.ipynb` — цифрові паспорти та дендрограма кластерів.
 * `04_rq3_spatial_propagation_routes.ipynb` — просторово-часові затримки між сусідами.
+* `05_ml_forecasting_experiment.ipynb` — повний цикл ML: бейзлайни, змагання моделей, Ablation Study та Test-іспит.
 
-### 3. Запуск автоматизованого тесту відтворюваності
+### 3. Автоматизоване виконання пайплайну
 ```bash
+# Етап 1: Тест відтворюваності аналітики
 python tests/verify_pipeline.py
+
+# Етап 2: Генерація ознак, бейзлайни, навчання та фінальна оцінка
+python src/features/feature_store.py
+python src/models/baselines.py
+python src/models/train_models.py
+python src/models/evaluate_test.py
 ```
 
 ---
@@ -85,20 +110,35 @@ python tests/verify_pipeline.py
 /home/yarooo/Projects/Agentic/
 ├── data/
 │   ├── raw/official_data_uk.csv               # Сирі дані (read-only)
-│   └── processed/alerts_clean_oblast.parquet  # Очищені дані Parquet (129,955 рядків)
+│   └── processed/
+│       ├── alerts_clean_oblast.parquet        # Очищені дані Parquet (129,955 рядків)
+│       └── ml_features_hourly.parquet         # Feature Store погодинної сітки (941,856 рядків)
 ├── документи/
-│   ├── методологія_та_правила_проекту.md      # Повна наукова специфікація та захист від витоку даних
-│   └── roadmap.md                             # Дорожня карта з 5 Quality Gates
+│   ├── методологія_та_правила_проекту.md      # Наукова специфікація Етапу 1
+│   ├── методологія_етап_2_машинне_навчання.md # Повна специфікація Етапу 2 (ML)
+│   ├── roadmap.md                             # Дорожня карта Етапу 1 (Quality Gates 1-5)
+│   └── roadmap_етап_2.md                      # Дорожня карта Етапу 2 (Quality Gates 2.1-2.5)
+├── models/                                    # Серіалізовані моделі (LightGBM, LogReg, Scalers)
 ├── src/
 │   ├── data/cleaner.py                        # Модуль фільтрації та типізації
-│   ├── features/cyclicity.py                  # Модуль аналізу циклічності
-│   ├── features/clustering.py                 # Модуль кластеризації областей
-│   └── features/propagation.py                # Модуль просторових лагів
-├── notebooks/                                 # 4 інтерактивні дослідницькі блокноти
+│   ├── features/
+│   │   ├── cyclicity.py                       # Модуль аналізу циклічності
+│   │   ├── clustering.py                      # Модуль кластеризації областей
+│   │   ├── propagation.py                     # Модуль просторових лагів
+│   │   └── feature_store.py                   # Модуль збірки Feature Store для ML
+│   └── models/
+│       ├── baselines.py                       # Наївний бейзлайн та Historical Lookup
+│       ├── train_models.py                    # Навчання LogReg, LightGBM, Ablation & Threshold tuning
+│       └── evaluate_test.py                   # Фінальна оцінка на Test, Lift та Feature Importance
+├── notebooks/                                 # 5 інтерактивних дослідницьких блокнотів
 ├── reports/
-│   ├── figures/                               # 6 графіків високої роздільної здатності (DPI 300)
+│   ├── figures/                               # 12 графіків високої роздільної здатності (DPI 300)
 │   ├── regional_clusters_summary.csv          # Зведена таблиця профілів 24 регіонів
-│   └── spatial_lead_lag_summary.csv           # Зведена таблиця затримок суміжних пар
+│   ├── spatial_lead_lag_summary.csv           # Зведена таблиця затримок суміжних пар
+│   ├── baselines_benchmark.csv                # Бенчмарк бейзлайнів
+│   ├── ml_validation_benchmark.csv            # Бенчмарк моделей на валідації
+│   ├── ml_models_benchmark.csv                # Фінальний бенчмарк на тестовій вибірці
+│   └── feature_importance_lightgbm.csv        # Таблиця факторів впливу
 ├── tests/
 │   └── verify_pipeline.py                     # Автоматизований стрес-тест
 ├── requirements.txt                           # Фіксація версій бібліотек
@@ -108,6 +148,9 @@ python tests/verify_pipeline.py
 ---
 
 ## 🛡️ Захист від пасток Data Science
-1. **Zero Data Leakage:** відсутність штучного перемішування даних; розбиття Train (2022–2024), Validation (2024–2025), Test (2025–2026); річні відносні нормалізації.
-2. **Timezone Uniformity:** внутрішнє зберігання виключно в UTC, аналіз активності — в `Europe/Kyiv`.
-3. **Outlier Isolation:** виділення окупованих територій (ТОТ) в окрему категорію; використання медіан та IQR замість середніх через важкий правий хвіст.
+1. **Zero Data Leakage:** строгий хронологічний спліт (Train 48%, Val 24%, Test 28%) з 2-годинним Embargo буфером.
+2. **Strict Backward Lags:** відсутність заглядання вперед у просторових та авторегресійних ознаках (`closed="left"`).
+3. **Imbalance-Aware Metrics:** відмова від Accuracy на користь $F_2$-Score (пріоритет Recall) та PR-AUC.
+4. **Frozen Threshold:** поріг $p^*$ фіксується виключно на Validation і без змін застосовується до Test.
+5. **Timezone Uniformity:** внутрішнє зберігання виключно в UTC, календарний аналіз — в `Europe/Kyiv`.
+6. **Outlier Isolation:** виділення ТОТ в окрему категорію; медіани та IQR для важких хвостів тривалості.
