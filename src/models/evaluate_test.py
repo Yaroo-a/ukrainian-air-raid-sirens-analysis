@@ -26,7 +26,7 @@ from sklearn.metrics import (
 
 FEATURE_SET_A = [
     'hour_sin', 'hour_cos', 'day_of_week', 'is_weekend', 'month',
-    'is_active_t', 'burden_last_6h', 'burden_last_24h',
+    'burden_last_6h', 'burden_last_24h',
     'cluster_1_rear', 'cluster_2_center', 'cluster_3_front'
 ]
 
@@ -77,8 +77,10 @@ def run_test_evaluation():
     # 1. Розрахунок прогнозів імовірностей
     probas = {}
     
-    # Naive Persistence (0/1 прогноз)
-    probas['Baseline 1: Naive Persistence'] = test_df['is_active_t'].values.astype(float)
+    # Naive Persistence (0/1 lagged onset forecast)
+    test_df = test_df.sort_values(["oblast", "timestamp_utc"]).reset_index(drop=True)
+    test_df["lagged_onset"] = test_df.groupby("oblast")["target_onset_next_1h"].shift(1).fillna(0).astype(int)
+    probas['Baseline 1: Naive Persistence'] = test_df['lagged_onset'].values.astype(float)
     
     # Historical Lookup
     probas['Baseline 2: Historical Lookup'] = test_df['lookup_prob'].values

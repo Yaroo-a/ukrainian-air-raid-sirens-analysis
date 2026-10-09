@@ -31,7 +31,7 @@ import lightgbm as lgb
 
 FEATURE_SET_A = [
     'hour_sin', 'hour_cos', 'day_of_week', 'is_weekend', 'month',
-    'is_active_t', 'burden_last_6h', 'burden_last_24h',
+    'burden_last_6h', 'burden_last_24h',
     'cluster_1_rear', 'cluster_2_center', 'cluster_3_front'
 ]
 
