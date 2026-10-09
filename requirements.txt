@@ -1,0 +1,18 @@
+# Core Data Analysis & Storage
+pandas>=2.0.0
+numpy>=1.24.0
+pyarrow>=14.0.0
+
+# Scientific Computing & Modeling
+scipy>=1.11.0
+statsmodels>=0.14.0
+scikit-learn>=1.3.0
+
+# Visualization & Mapping
+matplotlib>=3.8.0
+seaborn>=0.13.0
+plotly>=5.18.0
+
+# Interactive Notebooks
+jupyter>=1.0.0
+ipykernel>=6.28.0
