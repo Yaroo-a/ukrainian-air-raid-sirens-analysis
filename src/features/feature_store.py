@@ -1,16 +1,21 @@
-"""Feature Store Generator for Machine Learning Forecasting (Phase 2.1).
+"""Feature Store Generator for Machine Learning Forecasting (Phase 2.1 - Refactored).
 
 Transforms historical alert events into a regular hourly panel dataset (X, y)
-for 24 Ukrainian regions with strict Zero Data Leakage:
-1. Precise decision timestamp T (e.g. 14:00:00 UTC).
+for 24 Ukrainian regions with strict Data Leakage protections:
+1. Precise decision timestamp T (hourly grid in UTC).
 2. Conditioning on calm periods: filtered strictly to rows where alert is NOT active at T (is_active_T == 0).
-3. Target variable y_T: Onset of a new alert in the next hour interval (T, T + 60 min].
-4. Cyclical temporal transforms: hour_sin, hour_cos, day_of_week, is_weekend, month at moment T.
-5. Strictly backward-looking autoregressive features: burden_last_6h, burden_last_24h before moment T.
-6. Spatial neighbor features at exact moment T: neighbors_active_count, neighbor_any_active, neighbor_active_ratio.
-7. Regional clusters: read strictly from reports/clusters_train_only.csv (fitted on Train only).
-8. Purging & Embargo: 2-hour buffer at Train/Val and Val/Test boundaries.
-9. Output: data/processed/ml_features_hourly.parquet.
+3. Target variable y_T: Onset of a new alert in interval (T, T + 60 min].
+4. True temporal lag: lagged_onset_1h computed on full temporal grid BEFORE filtering calm rows.
+5. Adaptive baseline feature: adaptive_rate_14d computed on rolling past 14 days strictly before T.
+6. Cyclical temporal transforms: hour_sin, hour_cos, day_of_week, is_weekend, month at moment T.
+7. Autoregressive burden: burden_last_6h, burden_last_24h before moment T (closed="left").
+8. Spatial neighbor features at exact moment T: neighbors_active_count, neighbor_any_active, neighbor_active_ratio.
+9. Regional clusters: read strictly from reports/clusters_train_only.csv (Train-only fit).
+   - cluster_1_low_activity (Rear)
+   - cluster_2_medium_activity (Center/Transit)
+   - cluster_3_high_activity (High exposure / Front & Border)
+10. Purging & Embargo: 2-hour buffer at Train/Val and Val/Test boundaries.
+11. Output: data/processed/ml_features_hourly.parquet.
 """
 
 import sys
@@ -46,7 +51,7 @@ def generate_feature_store(
     output_parquet_path: str | Path = "data/processed/ml_features_hourly.parquet",
 ) -> pd.DataFrame:
     """Constructs the calm-period hourly ML feature matrix with strict causal lags."""
-    print("🚀 [Фаза 2.1] Початок генерації Feature Store (строго для періодів тиші)...")
+    print("🚀 [Фаза 2.1] Генерація Feature Store (строго періоди тиші, Train-only кластери)...")
     input_file = Path(parquet_path)
     clusters_file = Path(clusters_csv_path)
     output_file = Path(output_parquet_path)
@@ -69,14 +74,11 @@ def generate_feature_store(
     # 2. Hourly time grid: decision moments T
     min_time = clean_df["started_at"].min().floor("h")
     max_time = clean_df["started_at"].max().ceil("h")
-    # Time grid T_k with 1 hour step
     hourly_index = pd.date_range(start=min_time, end=max_time - pd.Timedelta(hours=1), freq="1h", tz="UTC")
     n_hours = len(hourly_index)
-    print(f"⏱️ Побудова годинної сітки моментів прогнозу T: {n_hours:,} точок ({min_time.date()} — {max_time.date()})...")
+    print(f"⏱️ Побудова повної годинної сітки: {n_hours:,} точок ({min_time.date()} — {max_time.date()})...")
 
     # 3. Create high-speed lookup matrices for each oblast
-    # active_at_T[k, o]: is alert active at exact timestamp T_k?
-    # onset_next_1h[k, o]: did a new alert START in (T_k, T_k + 1h]?
     active_at_T = np.zeros((n_hours, len(oblasts)), dtype=np.int8)
     onset_next_1h = np.zeros((n_hours, len(oblasts)), dtype=np.int8)
     o_idx_map = {o: i for i, o in enumerate(oblasts)}
@@ -84,7 +86,7 @@ def generate_feature_store(
     far_future = pd.Timestamp("2099-01-01", tz="UTC")
     clean_df["finished_at_safe"] = clean_df["finished_at"].fillna(far_future)
 
-    print("⚡ Векторизоване заповнення матриць активності на момент T та стартів у вікні (T, T+1h]...")
+    print("⚡ Векторизоване заповнення матриць активності та стартів...")
     for _, row in clean_df.iterrows():
         o_idx = o_idx_map[row["oblast"]]
         s_t = row["started_at"]
@@ -105,10 +107,10 @@ def generate_feature_store(
             onset_next_1h[k_onset, o_idx] = 1
 
     # 4. Generate records for each region
-    print("🛠️ Формування панельних ознак (час, сусіди, історія)...")
+    print("🛠️ Формування панельних ознак на повній сітці з казуальними лагами...")
     records = []
 
-    # Precalculate temporal features for decision moments T
+    # Temporal features for moments T
     kyiv_times = hourly_index.tz_convert("Europe/Kyiv")
     hours = kyiv_times.hour.values
     day_of_weeks = kyiv_times.dayofweek.values
@@ -118,7 +120,7 @@ def generate_feature_store(
     hour_sin = np.sin(2 * np.pi * hours / 24.0)
     hour_cos = np.cos(2 * np.pi * hours / 24.0)
 
-    # Precalculate train/val/test splits with 2-hour Embargo buffer
+    # Train/Val/Test split labels with 2-hour Embargo
     train_end = pd.Timestamp("2024-04-30 23:59:59", tz="UTC")
     val_end = pd.Timestamp("2025-05-31 23:59:59", tz="UTC")
 
@@ -138,16 +140,21 @@ def generate_feature_store(
     split_labels[is_test] = "test"
 
     for o_name, o_idx in o_idx_map.items():
-        # Own active status at moment T
-        own_active_at_T = active_at_T[:, o_idx]
-
-        # Target: whether new alert starts in (T, T+1h]
+        own_active = active_at_T[:, o_idx]
         target = onset_next_1h[:, o_idx]
 
-        # Autoregressive historical burden strictly BEFORE moment T (closed="left")
-        s_series = pd.Series(own_active_at_T)
+        # TRUE temporal lag: did an onset occur in the immediately preceding hour (T-1, T] on full grid?
+        lagged_onset_1h = np.zeros(n_hours, dtype=np.int8)
+        lagged_onset_1h[1:] = target[:-1]
+
+        # Autoregressive historical burden strictly before moment T (closed="left")
+        s_series = pd.Series(own_active)
         burden_6h = s_series.rolling(window=6, min_periods=1, closed="left").mean().fillna(0).values
         burden_24h = s_series.rolling(window=24, min_periods=1, closed="left").mean().fillna(0).values
+
+        # Adaptive baseline feature: rolling 14-day onset rate strictly before T (14*24 = 336 hours)
+        target_series = pd.Series(target)
+        adaptive_14d = target_series.rolling(window=336, min_periods=24, closed="left").mean().fillna(0.05).values
 
         # Spatial neighbors status at moment T
         nbr_names = neighbor_map[o_name]
@@ -170,7 +177,9 @@ def generate_feature_store(
             "oblast": o_name,
             "cluster_id": c_id,
             "split_set": split_labels,
-            "is_active_T": own_active_at_T,
+            "is_active_T": own_active,
+            "lagged_onset_1h": lagged_onset_1h,
+            "adaptive_rate_14d": adaptive_14d.astype(np.float32),
             # Features
             "hour_sin": hour_sin.astype(np.float32),
             "hour_cos": hour_cos.astype(np.float32),
@@ -182,26 +191,26 @@ def generate_feature_store(
             "neighbors_active_count": nbr_active_count.astype(np.int8),
             "neighbor_any_active": nbr_any_active,
             "neighbor_active_ratio": nbr_active_ratio.astype(np.float32),
-            # Target: onset in (T, T+1h]
+            # Target
             "target_onset_next_1h": target,
         })
         records.append(region_df)
 
     panel_df = pd.concat(records, ignore_index=True)
 
-    # 5. Filter out embargo buffer
+    # 5. Remove embargo buffer rows
     panel_df = panel_df[~panel_df["split_set"].isin(["embargo_train", "embargo_val"])].copy()
 
-    # 6. CRUCIAL RULE: Forecast strictly when alert is NOT active at moment T
-    print(f"🔍 Всього спостережень до фільтрації спокою: {len(panel_df):,}")
+    # 6. Filter strictly calm periods: alert is NOT active at moment T
+    print(f"🔍 Всього рядків до фільтрації спокою: {len(panel_df):,}")
     panel_df = panel_df[panel_df["is_active_T"] == 0].copy()
     panel_df.drop(columns=["is_active_T"], inplace=True)
     print(f"✅ Залишено періодів спокою (is_active_T == 0): {len(panel_df):,}")
 
-    # One-Hot Encoding for cluster_id (Categorical, strictly from Train)
-    panel_df["cluster_1_rear"] = (panel_df["cluster_id"] == 1).astype(np.int8)
-    panel_df["cluster_2_center"] = (panel_df["cluster_id"] == 2).astype(np.int8)
-    panel_df["cluster_3_front"] = (panel_df["cluster_id"] == 3).astype(np.int8)
+    # One-Hot Encoding for cluster_id with clear domain names
+    panel_df["cluster_1_low_activity"] = (panel_df["cluster_id"] == 1).astype(np.int8)
+    panel_df["cluster_2_medium_activity"] = (panel_df["cluster_id"] == 2).astype(np.int8)
+    panel_df["cluster_3_high_activity"] = (panel_df["cluster_id"] == 3).astype(np.int8)
 
     print(f"💾 Збереження {len(panel_df):,} рядків матриці ознак у {output_file}...")
     panel_df.to_parquet(output_file, engine="pyarrow", index=False)
