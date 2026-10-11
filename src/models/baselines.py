@@ -2,7 +2,7 @@
 
 Implements Level 0 benchmarks:
 1. True Naive Persistence Baseline:
-   True temporal lag of onset in the immediately preceding hour (T-1 -> T].
+   True temporal lag of onset in the immediately preceding hour [T-1h, T).
 2. Historical Lookup Table Baseline:
    Computes empirical probability P(Onset | day_of_week, hour_kyiv, cluster_id) strictly on Train.
 3. Adaptive Rolling Baseline (14-day local onset frequency):

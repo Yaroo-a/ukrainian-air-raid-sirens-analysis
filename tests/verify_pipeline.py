@@ -89,6 +89,7 @@ def verify_pipeline():
         "16_comparison_feature_shift_official_vs_volunteer.png",
         "17_comparison_alert_counts_and_durations.png",
         "18_volunteer_naive_sensitivity_comparison.png",
+        "19_walk_forward_vs_static_comparison.png",
     ]
     for fig_name in expected_comp_figures:
         fig_path = comp_dir / "figures" / fig_name
@@ -113,6 +114,9 @@ def verify_pipeline():
         (off_dir / "ml_test_post_aug2025_benchmark.csv", 11),
         (off_dir / "ml_recent_60d_benchmark.csv", 11),
         (off_dir / "feature_importance_lightgbm.csv", 22),
+        (off_dir / "walk_forward_monthly_metrics.csv", 16),
+        (off_dir / "walk_forward_overall_benchmark.csv", 13),
+        (off_dir / "walk_forward_recent_60d_benchmark.csv", 13),
         # Volunteer
         (vol_dir / "volunteer_train_median_durations.csv", 24),
         (vol_dir / "regional_clusters_summary.csv", 24),
@@ -128,10 +132,14 @@ def verify_pipeline():
         (vol_dir / "volunteer_ml_recent_60d_benchmark.csv", 11),
         (vol_dir / "volunteer_feature_importance_lightgbm.csv", 22),
         (vol_dir / "volunteer_naive_sensitivity.csv", 6),
+        (vol_dir / "volunteer_walk_forward_monthly_metrics.csv", 17),
+        (vol_dir / "volunteer_walk_forward_overall_benchmark.csv", 13),
+        (vol_dir / "volunteer_walk_forward_recent_60d_benchmark.csv", 13),
         # Comparison
         (comp_dir / "official_vs_volunteer_comparison.csv", 5),
         (comp_dir / "official_vs_volunteer_ml_metrics_comparison.csv", 55),
         (comp_dir / "official_vs_volunteer_feature_shift_comparison.csv", 10),
+        (comp_dir / "official_vs_volunteer_walk_forward_comparison.csv", 26),
     ]
     for csv_path, min_rows in expected_csvs:
         rel = csv_path.relative_to(project_root)

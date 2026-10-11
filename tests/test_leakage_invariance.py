@@ -285,5 +285,105 @@ def test_causal_truncation_invariance(n_random: int = 100):
         )
 
 
+def test_walk_forward_leakage_invariance():
+    """
+    Перевіряє каузальність Walk-Forward сплітів на кількох тестових місяцях M (для інтервалу цілі [T, T+1h)):
+    1. Усі рядки Train_M мають timestamp_utc <= T_start(Val_M) - 2h.
+    2. Усі рядки Val_M мають timestamp_utc <= T_start(M) - 2h.
+    3. При фізичному псуванні/інверсії всіх даних починаючи з T_start(M) - 1h (включно з місяцем M і всім майбутнім)
+       навчені з n_jobs=1 та фіксованим random_state=42 моделі (LightGBM Set C/D, LogReg Set C/D) та обрані
+       на Val_M пороги p*_M (включно з Adaptive 14-day WF p*_M) залишаються біт-в-біт ідентичними.
+    """
+    from src.models.run_walk_forward_experiment import (
+        FEATURE_SET_C,
+        FEATURE_SET_D_POST_HOC,
+        add_post_hoc_set_d_features,
+        fast_threshold_search_f2,
+        fit_fold_lightgbm,
+        fit_fold_logreg,
+        get_walk_forward_split_masks,
+    )
+
+    datasets = [
+        ("Official", PROJECT_ROOT / "data" / "processed" / "ml_features_hourly.parquet", ["2025-06", "2025-12", "2026-08"]),
+        ("Volunteer (naive_fixed_D)", PROJECT_ROOT / "data" / "processed" / "volunteer_ml_features_hourly_fixed_d.parquet", ["2025-06", "2025-12", "2026-09"]),
+    ]
+
+    for ds_label, pq_path, check_months in datasets:
+        if not pq_path.exists():
+            continue
+        df_orig = add_post_hoc_set_d_features(pd.read_parquet(pq_path))
+
+        for m_str in check_months:
+            m_start = pd.Timestamp(f"{m_str}-01 00:00:00", tz="UTC")
+            m_end = m_start + pd.DateOffset(months=1)
+
+            for win_mode in ["rolling_12m", "expanding"]:
+                tr_mask, va_mask, te_mask, bounds = get_walk_forward_split_masks(
+                    df_orig["timestamp_utc"], m_start, m_end, window_mode=win_mode, embargo_hours=2
+                )
+                tr_df = df_orig.loc[tr_mask]
+                va_df = df_orig.loc[va_mask]
+                te_df = df_orig.loc[te_mask]
+
+                # 1. Суворі нерівності часових міток з 2-годинним embargo для [T, T+1h)
+                assert len(tr_df) > 0 and len(va_df) > 0 and len(te_df) > 0
+                assert tr_df["timestamp_utc"].max() <= bounds["val_start"] - pd.Timedelta(hours=2), (
+                    f"[{ds_label} {m_str} {win_mode}] Train_M leaks into Val_M embargo!"
+                )
+                assert va_df["timestamp_utc"].min() >= bounds["val_start"]
+                assert va_df["timestamp_utc"].max() <= m_start - pd.Timedelta(hours=2), (
+                    f"[{ds_label} {m_str} {win_mode}] Val_M leaks into Test month M embargo!"
+                )
+                assert te_df["timestamp_utc"].min() >= m_start
+                assert te_df["timestamp_utc"].max() < m_end
+
+            # 2. Біт-в-біт інваріантність відносно мутації всіх рядків >= m_start - 1h (n_jobs=1, seed=42)
+            tr_mask, va_mask, _, _ = get_walk_forward_split_masks(
+                df_orig["timestamp_utc"], m_start, m_end, window_mode="rolling_12m", embargo_hours=2
+            )
+            tr_1 = df_orig.loc[tr_mask]
+            va_1 = df_orig.loc[va_mask]
+            y_tr_1 = tr_1["target_onset_next_1h"].values
+            y_va_1 = va_1["target_onset_next_1h"].values
+
+            th_adapt_1 = fast_threshold_search_f2(y_va_1, va_1["adaptive_rate_14d"].values)["threshold"]
+            lr_1, sc_1, th_lr_1, p_va_lr_1 = fit_fold_logreg(tr_1, y_tr_1, va_1, y_va_1, FEATURE_SET_D_POST_HOC, random_state=42)
+            lgb_1, th_lgb_1, p_va_lgb_1 = fit_fold_lightgbm(tr_1, y_tr_1, va_1, y_va_1, FEATURE_SET_C, n_jobs=1, random_state=42)
+
+            # Створюємо зіпсовану копію датасету, де все починаючи з (m_start - 1h) інвертовано/зашумлено
+            df_mut = df_orig.copy()
+            corrupt_mask = df_mut["timestamp_utc"] >= (m_start - pd.Timedelta(hours=1))
+            df_mut.loc[corrupt_mask, "target_onset_next_1h"] = 1 - df_mut.loc[corrupt_mask, "target_onset_next_1h"]
+            for fcol in FEATURE_SET_D_POST_HOC:
+                df_mut.loc[corrupt_mask, fcol] = np.array(-99, dtype=df_mut[fcol].dtype)
+
+            tr_mask_2, va_mask_2, _, _ = get_walk_forward_split_masks(
+                df_mut["timestamp_utc"], m_start, m_end, window_mode="rolling_12m", embargo_hours=2
+            )
+            tr_2 = df_mut.loc[tr_mask_2]
+            va_2 = df_mut.loc[va_mask_2]
+            y_tr_2 = tr_2["target_onset_next_1h"].values
+            y_va_2 = va_2["target_onset_next_1h"].values
+
+            th_adapt_2 = fast_threshold_search_f2(y_va_2, va_2["adaptive_rate_14d"].values)["threshold"]
+            lr_2, sc_2, th_lr_2, p_va_lr_2 = fit_fold_logreg(tr_2, y_tr_2, va_2, y_va_2, FEATURE_SET_D_POST_HOC, random_state=42)
+            lgb_2, th_lgb_2, p_va_lgb_2 = fit_fold_lightgbm(tr_2, y_tr_2, va_2, y_va_2, FEATURE_SET_C, n_jobs=1, random_state=42)
+
+            assert th_adapt_1 == th_adapt_2, f"Adaptive WF threshold leaked from month {m_str}!"
+            assert th_lr_1 == th_lr_2, f"LogReg WF threshold leaked from month {m_str}!"
+            assert th_lgb_1 == th_lgb_2, f"LightGBM WF threshold leaked from month {m_str}!"
+            assert np.array_equal(p_va_lr_1, p_va_lr_2), f"LogReg Val predictions not bit-for-bit identical on {m_str}!"
+            assert np.array_equal(p_va_lgb_1, p_va_lgb_2), f"LightGBM Val predictions not bit-for-bit identical on {m_str}!"
+            assert np.array_equal(lr_1.coef_, lr_2.coef_), f"LogReg weights not bit-for-bit identical on {m_str}!"
+
+        print(
+            f"✔ [{ds_label}] Walk-Forward Leakage & Bit-for-Bit Invariance Test PASSED "
+            f"(months={check_months}, embargo=2h for [T, T+1h), n_jobs=1, seed=42)."
+        )
+
+
 if __name__ == "__main__":
     test_causal_truncation_invariance()
+    test_walk_forward_leakage_invariance()
+

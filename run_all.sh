@@ -41,9 +41,10 @@ echo -e "\n[6/9] Навчання бейзлайнів, моделей A/B/C/C' 
 "$PYTHON" src/models/train_models.py
 "$PYTHON" src/models/evaluate_test.py
 
-echo -e "\n[7/9] Повний експеримент, аналіз чутливості на волонтерських даних та міжджерельне порівняння..."
+echo -e "\n[7/9] Повний експеримент, аналіз чутливості на волонтерських даних, Walk-Forward та міжджерельне порівняння..."
 "$PYTHON" src/models/run_volunteer_experiment.py
 "$PYTHON" src/models/compare_official_vs_volunteer_metrics.py
+"$PYTHON" src/models/run_walk_forward_experiment.py
 
 echo -e "\n[8/9] Повне виконання всіх 5 Jupyter Notebooks з нуля (Restart & Run All)..."
 "$JUPYTER" nbconvert --to notebook --execute --inplace \
