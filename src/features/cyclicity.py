@@ -229,7 +229,7 @@ def analyze_temporal_cyclicity(parquet_path: str | Path, output_dir: str | Path)
 if __name__ == "__main__":
     project_root = Path(__file__).resolve().parents[2]
     parquet_file = project_root / "data" / "processed" / "alerts_clean_oblast.parquet"
-    figures_dir = project_root / "reports" / "figures"
+    figures_dir = project_root / "reports" / "official" / "figures"
 
     results = analyze_temporal_cyclicity(parquet_file, figures_dir)
 
@@ -242,5 +242,5 @@ if __name__ == "__main__":
     assert (figures_dir / "03_duration_distribution.png").exists(), "Gate 2 Fail: Figure 3 missing!"
     print("✔ Критерій 1: p-value Kruskal-Wallis отримано з коректною математичною оцінкою.")
     print("✔ Критерій 2: Попарний тест Бонферроні на 21 пару розраховано.")
-    print("✔ Критерій 3: Усі 3 графіки високої роздільної здатності згенеровано в reports/figures/.")
+    print("✔ Критерій 3: Усі 3 графіки високої роздільної здатності згенеровано в reports/official/figures/.")
     print("🎉 QUALITY GATE 2 УСПІШНО ПРОЙДЕНО!")

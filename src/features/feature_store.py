@@ -56,7 +56,7 @@ def build_neighbor_dict(regions: list[str]) -> dict[str, list[str]]:
 
 def generate_feature_store(
     parquet_path: str | Path = "data/processed/alerts_clean_oblast.parquet",
-    clusters_csv_path: str | Path = "reports/clusters_train_only.csv",
+    clusters_csv_path: str | Path = "reports/official/clusters_train_only.csv",
     output_parquet_path: str | Path = "data/processed/ml_features_hourly.parquet",
 ) -> pd.DataFrame:
     """Constructs the calm-period hourly ML feature matrix with strict causal lags (Sets A, B, C)."""

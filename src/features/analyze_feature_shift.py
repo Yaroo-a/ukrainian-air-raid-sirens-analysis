@@ -25,8 +25,8 @@ FEATURES_TO_CHECK = [
 
 def analyze_feature_shift(
     parquet_path: str | Path = "data/processed/ml_features_hourly.parquet",
-    out_splits_csv: str | Path = "reports/feature_shift_summary.csv",
-    out_subperiods_csv: str | Path = "reports/feature_shift_test_subperiods.csv",
+    out_splits_csv: str | Path = "reports/official/feature_shift_summary.csv",
+    out_subperiods_csv: str | Path = "reports/official/feature_shift_test_subperiods.csv",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     df = pd.read_parquet(parquet_path)
 

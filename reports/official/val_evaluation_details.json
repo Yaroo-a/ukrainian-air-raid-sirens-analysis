@@ -1,0 +1,142 @@
+{
+  "val_total_rows": 190195,
+  "val_total_days": 397,
+  "val_positives": 19342,
+  "val_base_rate": 0.10169562817108757,
+  "selection_rule": "arg max PR-AUC on Validation among pre-specified models (Sets A, B, C)",
+  "selected_model_on_val": "LightGBM (Set C: Spatial + Adaptive)",
+  "selected_model_val_pr_auc": 0.30122521291593196,
+  "selected_model_val_f2": 0.5330692266845533,
+  "paired_day_bootstrap_500_val": {
+    "PRIMARY_lgb_C_minus_adaptive_prauc": {
+      "mean": 0.050586973396864764,
+      "ci_low": 0.04294962946613795,
+      "ci_high": 0.05773124968261747
+    },
+    "PRIMARY_lgb_C_minus_adaptive_f2": {
+      "mean": 0.04435017934351804,
+      "ci_low": 0.03845953265811403,
+      "ci_high": 0.05047514987928461
+    },
+    "lgb_Cprime_minus_adaptive_prauc": {
+      "mean": 0.061324168622228156,
+      "ci_low": 0.055589178997345265,
+      "ci_high": 0.06671925187721986
+    },
+    "lgb_Cprime_minus_adaptive_f2": {
+      "mean": 0.04714613174911806,
+      "ci_low": 0.04149895715022963,
+      "ci_high": 0.052870083824118425
+    },
+    "lgb_Cprime_minus_B_prauc": {
+      "mean": 0.015807894863051692,
+      "ci_low": 0.010045706500111887,
+      "ci_high": 0.02175844713945058
+    },
+    "lgb_Cprime_minus_B_f2": {
+      "mean": 0.011630253593353129,
+      "ci_low": 0.007850297653643775,
+      "ci_high": 0.0153241168570636
+    },
+    "lgb_Cprime_minus_C_prauc": {
+      "mean": 0.010737195225363401,
+      "ci_low": 0.005068552530052342,
+      "ci_high": 0.015702167451106707
+    },
+    "lgb_Cprime_minus_C_f2": {
+      "mean": 0.002795952405600032,
+      "ci_low": -0.00017729677005191564,
+      "ci_high": 0.005434594162468924
+    },
+    "lr_C_minus_adaptive_prauc": {
+      "mean": 0.019233554581064346,
+      "ci_low": 0.01358022914078977,
+      "ci_high": 0.024745529739095183
+    },
+    "lr_C_minus_adaptive_f2": {
+      "mean": 0.03343299085021306,
+      "ci_low": 0.028350726017281957,
+      "ci_high": 0.03844579108072076
+    },
+    "lr_Cprime_minus_adaptive_prauc": {
+      "mean": 0.03751152929609382,
+      "ci_low": 0.03281531714698441,
+      "ci_high": 0.042387520156988386
+    },
+    "lr_Cprime_minus_adaptive_f2": {
+      "mean": 0.02829090877654156,
+      "ci_low": 0.024324277285908465,
+      "ci_high": 0.03226703882791179
+    },
+    "lr_Cprime_minus_B_prauc": {
+      "mean": -2.2355934887980045e-05,
+      "ci_low": -0.004771181486244035,
+      "ci_high": 0.004695787973457404
+    },
+    "lr_Cprime_minus_B_f2": {
+      "mean": 0.012021580629798643,
+      "ci_low": 0.008494193748061929,
+      "ci_high": 0.015521434019807493
+    },
+    "lgb_B_minus_A_prauc": {
+      "mean": 0.028142349115937465,
+      "ci_low": 0.025455010709101306,
+      "ci_high": 0.031206970096533695
+    },
+    "lgb_B_minus_A_f2": {
+      "mean": 0.03629832803780803,
+      "ci_low": 0.03163313212932042,
+      "ci_high": 0.04130679963117777
+    },
+    "lgb_C_minus_B_prauc": {
+      "mean": 0.0050706996376882925,
+      "ci_low": -0.0032308264502554176,
+      "ci_high": 0.014026485681047671
+    },
+    "lgb_C_minus_B_f2": {
+      "mean": 0.008834301187753097,
+      "ci_low": 0.004820415989429949,
+      "ci_high": 0.012995453584967117
+    },
+    "lgb_C_minus_A_prauc": {
+      "mean": 0.03321304875362575,
+      "ci_low": 0.024463331345610722,
+      "ci_high": 0.04193345695651127
+    },
+    "lgb_C_minus_A_f2": {
+      "mean": 0.04513262922556113,
+      "ci_low": 0.03943161722489257,
+      "ci_high": 0.0512452418263597
+    },
+    "lr_B_minus_A_prauc": {
+      "mean": 0.021511208045811508,
+      "ci_low": 0.017245571922607308,
+      "ci_high": 0.025501797240465467
+    },
+    "lr_B_minus_A_f2": {
+      "mean": 0.02327810818960407,
+      "ci_low": 0.01891330535477149,
+      "ci_high": 0.027858528036781908
+    },
+    "lr_C_minus_B_prauc": {
+      "mean": -0.01830033064991745,
+      "ci_low": -0.024040884428884992,
+      "ci_high": -0.012054505283402173
+    },
+    "lr_C_minus_B_f2": {
+      "mean": 0.017163662703470146,
+      "ci_low": 0.013346431655388579,
+      "ci_high": 0.02122441382005692
+    },
+    "lr_C_minus_A_prauc": {
+      "mean": 0.003210877395894055,
+      "ci_low": -0.004739862296264291,
+      "ci_high": 0.011132107236409432
+    },
+    "lr_C_minus_A_f2": {
+      "mean": 0.04044177089307422,
+      "ci_low": 0.0355510891626417,
+      "ci_high": 0.044982067046293296
+    }
+  }
+}

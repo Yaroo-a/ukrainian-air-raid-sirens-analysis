@@ -148,14 +148,14 @@ def train_lightgbm_model(X_train, y_train, X_val, y_val, feature_names):
 def run_pipeline():
     """Повний цикл навчання, валідації та оцінки для фази 2.3 (A, B, C, C')."""
     os.makedirs("models", exist_ok=True)
-    os.makedirs("reports/figures", exist_ok=True)
+    os.makedirs("reports/official/figures", exist_ok=True)
 
     train_df, val_df = load_datasets()
 
     y_train = train_df["target_onset_next_1h"].values
     y_val = val_df["target_onset_next_1h"].values
 
-    baselines_df = pd.read_csv("reports/baselines_benchmark.csv")
+    baselines_df = pd.read_csv("reports/official/baselines_benchmark.csv")
 
     # 1. Logistic Regression: Set A, Set B, Set C, Set C'
     lr_a, scaler_a = train_logistic_regression(train_df, y_train, FEATURE_SET_A)
@@ -261,7 +261,7 @@ def run_pipeline():
         })
 
     res_df = pd.DataFrame(benchmark_rows)
-    res_df.to_csv("reports/ml_validation_benchmark.csv", index=False)
+    res_df.to_csv("reports/official/ml_validation_benchmark.csv", index=False)
     print("\n" + "=" * 95)
     print("ПІДСУМКОВА ТАБЛИЦЯ ВАЛІДАЦІЇ (Validation Set: A vs B vs C vs C'):")
     print("=" * 95)
@@ -290,12 +290,22 @@ def run_pipeline():
             "LightGBM (Set C': Adaptive + Lags)": curve_lgb_cp,
         },
         optimal_thresholds=optimal_thresholds,
+        figures_dir="reports/official/figures",
+        dataset_tag="",
     )
     print("Графіки валідації збережено успішно.")
 
 
-def plot_curves(y_val, probas_dict, curves_dict, optimal_thresholds):
+def plot_curves(
+    y_val,
+    probas_dict,
+    curves_dict,
+    optimal_thresholds,
+    figures_dir: str = "reports/official/figures",
+    dataset_tag: str = "",
+):
     """Будує Precision-Recall криві та графіки F2 від порогу на Validation (A, B, C, C')."""
+    os.makedirs(figures_dir, exist_ok=True)
     plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
 
     colors = {
@@ -308,6 +318,8 @@ def plot_curves(y_val, probas_dict, curves_dict, optimal_thresholds):
         "LightGBM (Set C: Spatial + Adaptive)": "#d62728",
         "LightGBM (Set C': Adaptive + Lags)": "#8c2d04",
     }
+
+    title_suffix = f" [{dataset_tag}]" if dataset_tag else ""
 
     # 1. Precision-Recall Curves
     fig, ax = plt.subplots(figsize=(11, 7.2), dpi=300)
@@ -324,14 +336,14 @@ def plot_curves(y_val, probas_dict, curves_dict, optimal_thresholds):
             linewidth=2.3 if "Set C" in name else 1.7,
         )
 
-    ax.set_title("Precision-Recall криві на Validation (Ablation Study: Набори A, B, C, C')", fontsize=13, fontweight="bold", pad=12)
+    ax.set_title(f"Precision-Recall криві на Validation (Ablation Study: Набори A, B, C, C'){title_suffix}", fontsize=13, fontweight="bold", pad=12)
     ax.set_xlabel("Recall (Повнота виявлення початку тривог)", fontsize=11)
     ax.set_ylabel("Precision (Точність сповіщень)", fontsize=11)
     ax.set_xlim([0.0, 1.0])
     ax.set_ylim([0.0, 1.02])
     ax.legend(loc="upper right", frameon=True, fontsize=8.8)
     fig.tight_layout()
-    fig.savefig("reports/figures/08_ml_pr_curves_validation.png")
+    fig.savefig(os.path.join(figures_dir, "08_ml_pr_curves_validation.png"))
     plt.close(fig)
 
     # 2. F2 Score vs Classification Threshold
@@ -347,13 +359,13 @@ def plot_curves(y_val, probas_dict, curves_dict, optimal_thresholds):
         )
         ax.scatter([opt_th], [best_f2], color=colors.get(name, "black"), s=60, zorder=5)
 
-    ax.set_title("Підбір оптимального порогу $p^*$ на Validation для максимізації $F_2$-Score (A, B, C, C')", fontsize=13, fontweight="bold", pad=12)
+    ax.set_title(f"Підбір оптимального порогу $p^*$ на Validation для максимізації $F_2$-Score (A, B, C, C'){title_suffix}", fontsize=13, fontweight="bold", pad=12)
     ax.set_xlabel("Поріг класифікації ($p$)", fontsize=11)
     ax.set_ylabel("$F_2$-Score (пріоритет Recall)", fontsize=11)
     ax.set_xlim([0.01, 0.70])
     ax.legend(loc="lower center", frameon=True, fontsize=8.5)
     fig.tight_layout()
-    fig.savefig("reports/figures/09_threshold_tuning_f2.png")
+    fig.savefig(os.path.join(figures_dir, "09_threshold_tuning_f2.png"))
     plt.close(fig)
 
 

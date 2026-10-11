@@ -261,7 +261,7 @@ def perform_regional_clustering(parquet_path: str | Path, output_dir: str | Path
 if __name__ == "__main__":
     project_root = Path(__file__).resolve().parents[2]
     parquet_file = project_root / "data" / "processed" / "alerts_clean_oblast.parquet"
-    reports_dir = project_root / "reports"
+    reports_dir = project_root / "reports" / "official"
 
     results = perform_regional_clustering(parquet_file, reports_dir)
 

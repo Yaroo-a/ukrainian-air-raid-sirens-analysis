@@ -1,0 +1,48 @@
+{
+  "official_data_uk": {
+    "path": "data/raw/official_data_uk.csv",
+    "sha256": "1f50085481d229f57b624d83b1ce723e884dea409c14afb5b7040c8a2f233e4f",
+    "verified_date": "2026-10-11",
+    "total_rows": 299275,
+    "exact_duplicates_total": 113845,
+    "unique_rows_total": 185430,
+    "min_started_at": "2022-03-15 16:10:34+00:00",
+    "max_started_at": "2026-09-07 05:28:22+00:00",
+    "block_1": {
+      "row_slice": "0..113910",
+      "rows": 113911,
+      "internal_duplicates": 0,
+      "min_started_at": "2022-03-15 16:10:34+00:00",
+      "max_started_at": "2026-01-25 13:11:52+00:00"
+    },
+    "block_2": {
+      "row_slice": "113911..227831",
+      "rows": 113921,
+      "internal_duplicates": 0,
+      "min_started_at": "2022-03-15 16:10:34+00:00",
+      "max_started_at": "2026-01-25 13:11:52+00:00",
+      "exact_matches_with_block_1": 113845,
+      "rows_in_block_2_not_in_block_1": 76,
+      "rows_in_block_1_not_in_block_2": 66
+    },
+    "block_3": {
+      "row_slice": "227832..299274",
+      "rows": 71443,
+      "internal_duplicates": 0,
+      "min_started_at": "2026-01-23 12:42:58+00:00",
+      "max_started_at": "2026-09-07 05:28:22+00:00",
+      "overlap_with_blocks_1_2": 0
+    }
+  },
+  "volunteer_data_uk": {
+    "path": "data/raw/volunteer_data_uk.csv",
+    "sha256": "1ead8618b1f5eb8eda2fe4a14e5fefa773a14534aba21aae577e463189da783b",
+    "verified_date": "2026-10-11",
+    "total_rows": 115989,
+    "exact_duplicates_total": 0,
+    "min_started_at": "2022-02-25 16:36:22+00:00",
+    "max_started_at": "2026-10-11 04:36:59+00:00",
+    "naive_true_count": 5812,
+    "naive_true_share": 0.05010819991550923
+  }
+}

@@ -224,6 +224,218 @@ def clean_and_profile_data(
     return df
 
 
+def compute_train_median_durations_volunteer(
+    raw_df: pd.DataFrame,
+    train_start: pd.Timestamp = pd.Timestamp("2022-03-15 00:00:00", tz="UTC"),
+    train_end: pd.Timestamp = pd.Timestamp("2024-04-30 23:59:59", tz="UTC"),
+    min_duration_seconds: int = 60,
+) -> dict[str, float]:
+    """
+    Обчислює каузальну медіанну тривалість D_oblast (у секундах) для кожної області
+    виключно на даних Train (2022-03-15 .. 2024-04-30 23:59:59 UTC) серед тривог із naive == False.
+    Тривоги, що перетинають train_end, цензуруються по train_end.
+    """
+    df = raw_df.copy()
+    if "region" in df.columns:
+        df = df.rename(columns={"region": "oblast"})
+    df["oblast"] = df["oblast"].replace({"Київ": "м. Київ"})
+    df["started_at"] = pd.to_datetime(df["started_at"], utc=True)
+    df["finished_at"] = pd.to_datetime(df["finished_at"], utc=True)
+
+    train_sub = df[
+        (df["started_at"] >= train_start)
+        & (df["started_at"] <= train_end)
+        & (~df["naive"].astype(bool))
+        & df["finished_at"].notna()
+    ].copy()
+
+    censored_end = train_sub["finished_at"].clip(upper=train_end)
+    dur_sec = (censored_end - train_sub["started_at"]).dt.total_seconds()
+    train_sub["dur_sec"] = dur_sec
+    train_sub = train_sub[train_sub["dur_sec"] >= min_duration_seconds]
+
+    medians = train_sub.groupby("oblast")["dur_sec"].median().to_dict()
+    global_median = float(train_sub["dur_sec"].median())
+    for ob in df["oblast"].unique():
+        if ob not in medians or pd.isna(medians[ob]):
+            medians[ob] = global_median
+    return {k: float(v) for k, v in medians.items()}
+
+
+def merge_volunteer_intervals(df: pd.DataFrame) -> pd.DataFrame:
+    """Об'єднує перетинні або суміжні інтервали [started_at, finished_at] у межах кожної області для волонтерських даних."""
+    df_sorted = df.sort_values(["oblast", "started_at", "finished_at"]).reset_index(drop=True)
+    merged_rows = []
+
+    for oblast, group in df_sorted.groupby("oblast", sort=False):
+        starts = group["started_at"].tolist()
+        ends = group["finished_at"].tolist()
+        naives = group["naive"].astype(bool).tolist()
+
+        if not starts:
+            continue
+
+        cur_start = starts[0]
+        cur_end = ends[0]
+        cur_naive = naives[0]
+
+        for i in range(1, len(starts)):
+            s = starts[i]
+            e = ends[i]
+            nv = naives[i]
+
+            if pd.isna(cur_end) or s <= cur_end:
+                if pd.isna(cur_end) or pd.isna(e):
+                    cur_end = pd.NaT
+                elif e > cur_end:
+                    cur_end = e
+                cur_naive = cur_naive or nv
+            else:
+                merged_rows.append({
+                    "oblast": oblast,
+                    "raion": None,
+                    "hromada": None,
+                    "level": "oblast",
+                    "started_at": cur_start,
+                    "finished_at": cur_end,
+                    "naive": cur_naive,
+                    "source": "volunteer",
+                })
+                cur_start = s
+                cur_end = e
+                cur_naive = nv
+
+        merged_rows.append({
+            "oblast": oblast,
+            "raion": None,
+            "hromada": None,
+            "level": "oblast",
+            "started_at": cur_start,
+            "finished_at": cur_end,
+            "naive": cur_naive,
+            "source": "volunteer",
+        })
+
+    res = pd.DataFrame(merged_rows)
+    res["started_at"] = pd.to_datetime(res["started_at"], utc=True)
+    res["finished_at"] = pd.to_datetime(res["finished_at"], utc=True)
+    return res
+
+
+def clean_volunteer_data(
+    input_csv_path: str | Path,
+    output_parquet_path: str | Path,
+    naive_mode: str = "naive_as_is",
+    train_start: pd.Timestamp = pd.Timestamp("2022-03-15 00:00:00", tz="UTC"),
+    min_duration_seconds: int = 60,
+    precomputed_d_map: dict[str, float] | None = None,
+) -> pd.DataFrame:
+    """
+    Очищує волонтерський датасет volunteer_data_uk.csv (eTryvoga).
+    Підтримує три каузальні режими обробки naive == True:
+      - 'naive_as_is': залишає finished_at = started_at + 30 хв як у сирому файлі;
+      - 'drop_naive': видаляє записи з naive == True;
+      - 'naive_fixed_D': замінює finished_at = started_at + D_oblast для naive == True,
+        де D_oblast — медіанна тривалість не-наївних тривог в області строго на Train (<= 2024-04-30).
+    """
+    if naive_mode not in ("naive_as_is", "drop_naive", "naive_fixed_D"):
+        raise ValueError(f"Unknown naive_mode: {naive_mode}")
+
+    input_path = Path(input_csv_path)
+    output_path = Path(output_parquet_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    print(f"\n📖 [Volunteer: {naive_mode}] Читання {input_path}...")
+    raw_df = pd.read_csv(input_path)
+    raw_count = len(raw_df)
+
+    # 1. Дедуплікація сирого CSV
+    raw_dups = int(raw_df.duplicated().sum())
+    df = raw_df.drop_duplicates(keep="first").copy()
+    assert int(df.duplicated().sum()) == 0
+
+    # 2. Адаптер схеми: region -> oblast, Київ -> м. Київ
+    df = df.rename(columns={"region": "oblast"})
+    df["oblast"] = df["oblast"].replace({"Київ": "м. Київ"})
+    df["naive"] = df["naive"].astype(bool)
+
+    df["started_at"] = pd.to_datetime(df["started_at"], utc=True)
+    df["finished_at"] = pd.to_datetime(df["finished_at"], utc=True)
+
+    # 3. Обмеження старту Train від 2022-03-15 00:00:00 UTC (для порівнянності з official)
+    before_train_start = int((df["started_at"] < train_start).sum())
+    df = df[df["started_at"] >= train_start].copy()
+
+    # 4. Фільтрація технічних збоїв (< 60с або від'ємна тривалість) на сирих часових мітках
+    is_fin = df["finished_at"].notna()
+    dur_raw = (df["finished_at"] - df["started_at"]).dt.total_seconds()
+    glitch_mask = is_fin & (dur_raw < min_duration_seconds)
+    glitch_removed = int(glitch_mask.sum())
+    df = df[~glitch_mask].copy()
+
+    # 5. Обробка режиму naive
+    train_end = pd.Timestamp("2024-04-30 23:59:59", tz="UTC")
+    val_end = pd.Timestamp("2025-05-31 23:59:59", tz="UTC")
+
+    if naive_mode == "drop_naive":
+        naive_dropped = int(df["naive"].sum())
+        df = df[~df["naive"]].copy()
+        print(f"   - [drop_naive] Видалено записів з naive=True: {naive_dropped:,}")
+    elif naive_mode == "naive_fixed_D":
+        d_map = precomputed_d_map or compute_train_median_durations_volunteer(
+            raw_df, train_start=train_start, train_end=train_end, min_duration_seconds=min_duration_seconds
+        )
+        naive_mask = df["naive"].values
+        d_seconds = df.loc[naive_mask, "oblast"].map(d_map).values
+        df.loc[naive_mask, "finished_at"] = (
+            df.loc[naive_mask, "started_at"] + pd.to_timedelta(d_seconds, unit="s")
+        )
+        print(f"   - [naive_fixed_D] Замінено finished_at = started_at + D_oblast для {int(naive_mask.sum()):,} записів")
+
+    # 6. Об'єднання перетинних/суміжних інтервалів у межах області
+    pre_merge_len = len(df)
+    df = merge_volunteer_intervals(df)
+    merged_diff = pre_merge_len - len(df)
+    print(
+        f"   - Сирих: {raw_count:,} (дубл: {raw_dups}, до {train_start.date()}: -{before_train_start:,}, "
+        f"<60s: -{glitch_removed:,}) -> До злиття: {pre_merge_len:,} -> Після злиття: {len(df):,} (злито: {merged_diff:,})"
+    )
+
+    assert int(df.duplicated(subset=["oblast", "started_at", "finished_at"]).sum()) == 0
+    assert int(df.duplicated(subset=["oblast", "started_at"]).sum()) == 0
+
+    df["is_finished"] = df["finished_at"].notna()
+    duration_s = (df["finished_at"] - df["started_at"]).dt.total_seconds()
+    df["duration_seconds"] = duration_s
+    df["duration_minutes"] = duration_s / 60.0
+    df["duration_hours"] = duration_s / 3600.0
+
+    df["is_occupied_extreme"] = df["oblast"].isin(OCCUPIED_EXTREME_REGIONS)
+
+    kyiv_tz = "Europe/Kyiv"
+    df["started_at_kyiv"] = df["started_at"].dt.tz_convert(kyiv_tz)
+    df["finished_at_kyiv"] = df["finished_at"].dt.tz_convert(kyiv_tz)
+    df["start_year"] = df["started_at_kyiv"].dt.year
+    df["start_month"] = df["started_at_kyiv"].dt.month
+    df["start_date"] = df["started_at_kyiv"].dt.date
+    df["start_hour_kyiv"] = df["started_at_kyiv"].dt.hour
+    df["start_day_of_week"] = df["started_at_kyiv"].dt.day_name()
+    df["start_day_num"] = df["started_at_kyiv"].dt.dayofweek
+    df["is_night"] = df["start_hour_kyiv"].between(0, 5)
+
+    conditions = [
+        df["started_at"] <= train_end,
+        (df["started_at"] > train_end) & (df["started_at"] <= val_end),
+        df["started_at"] > val_end,
+    ]
+    df["split_set"] = np.select(conditions, ["train", "val", "test"], default="train")
+    df = df.sort_values("started_at").reset_index(drop=True)
+
+    df.to_parquet(output_path, engine="pyarrow", index=False)
+    print(f"   💾 Збережено у {output_path} ({len(df):,} рядків)")
+    return df
+
+
 if __name__ == "__main__":
     project_root = Path(__file__).resolve().parents[2]
     raw_csv = project_root / "data" / "raw" / "official_data_uk.csv"
@@ -261,4 +473,35 @@ if __name__ == "__main__":
     print(f"     Validation: {len(val_dates):,} рядків ({val_dates.min()} — {val_dates.max()})")
     print(f"     Test:       {len(test_dates):,} рядків ({test_dates.min()} — {test_dates.max()})")
 
+    vol_csv = project_root / "data" / "raw" / "volunteer_data_uk.csv"
+    if vol_csv.exists():
+        raw_vol_df = pd.read_csv(vol_csv)
+        d_map = compute_train_median_durations_volunteer(raw_vol_df)
+        d_df = pd.DataFrame([
+            {"oblast": k, "train_median_duration_sec": v, "train_median_duration_min": round(v / 60.0, 2)}
+            for k, v in sorted(d_map.items())
+        ])
+        d_out = project_root / "reports" / "volunteer" / "volunteer_train_median_durations.csv"
+        d_out.parent.mkdir(parents=True, exist_ok=True)
+        d_df.to_csv(d_out, index=False)
+        print(f"\n📊 Збережено каузальні медіанні тривалості D_oblast (Train, naive==False) у {d_out}")
+
+        clean_volunteer_data(
+            vol_csv,
+            project_root / "data" / "processed" / "volunteer_alerts_clean_as_is.parquet",
+            naive_mode="naive_as_is",
+        )
+        clean_volunteer_data(
+            vol_csv,
+            project_root / "data" / "processed" / "volunteer_alerts_clean_drop_naive.parquet",
+            naive_mode="drop_naive",
+        )
+        clean_volunteer_data(
+            vol_csv,
+            project_root / "data" / "processed" / "volunteer_alerts_clean_fixed_d.parquet",
+            naive_mode="naive_fixed_D",
+            precomputed_d_map=d_map,
+        )
+
     print("\n🎉 QUALITY GATE 1 УСПІШНО ПРОЙДЕНО!")
+

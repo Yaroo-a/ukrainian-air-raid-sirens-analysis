@@ -44,10 +44,11 @@ from src.models.train_models import (
 
 
 def load_test_data_and_models(parquet_path: str = "data/processed/ml_features_hourly.parquet"):
-    """Завантажує тестовий набір даних, таблицю бейзлайну та натреновані моделі (A, B, C, C')."""
+    """Завантажує валідаційний та тестовий набори даних, таблицю бейзлайну та натреновані моделі (A, B, C, C')."""
     print("Завантаження даних та моделей...")
     df = pd.read_parquet(parquet_path)
     train_df = df[df["split_set"] == "train"].copy()
+    val_df = df[df["split_set"] == "val"].copy()
     test_df = df[df["split_set"] == "test"].copy()
 
     with open("models/optimal_thresholds.json", "r", encoding="utf-8") as f:
@@ -55,6 +56,8 @@ def load_test_data_and_models(parquet_path: str = "data/processed/ml_features_ho
 
     # Таблиця шансів Historical Lookup з Train (Київський час!)
     train_df["hour_kyiv"] = train_df["timestamp_utc"].dt.tz_convert("Europe/Kyiv").dt.hour
+    val_df["hour_kyiv"] = val_df["timestamp_utc"].dt.tz_convert("Europe/Kyiv").dt.hour
+    val_df["date_kyiv"] = val_df["timestamp_utc"].dt.tz_convert("Europe/Kyiv").dt.date
     test_df["hour_kyiv"] = test_df["timestamp_utc"].dt.tz_convert("Europe/Kyiv").dt.hour
     test_df["date_kyiv"] = test_df["timestamp_utc"].dt.tz_convert("Europe/Kyiv").dt.date
 
@@ -65,6 +68,9 @@ def load_test_data_and_models(parquet_path: str = "data/processed/ml_features_ho
     )
     lookup.rename(columns={"target_onset_next_1h": "lookup_prob"}, inplace=True)
     global_mean = train_df["target_onset_next_1h"].mean()
+
+    val_merged = val_df.merge(lookup, on=["day_of_week", "hour_kyiv", "cluster_id"], how="left")
+    val_merged["lookup_prob"] = val_merged["lookup_prob"].fillna(global_mean)
 
     test_merged = test_df.merge(lookup, on=["day_of_week", "hour_kyiv", "cluster_id"], how="left")
     test_merged["lookup_prob"] = test_merged["lookup_prob"].fillna(global_mean)
@@ -84,7 +90,7 @@ def load_test_data_and_models(parquet_path: str = "data/processed/ml_features_ho
         "lgb_cp": joblib.load("models/lightgbm_c_prime.joblib"),
     }
 
-    return test_merged, thresholds, models
+    return val_merged, test_merged, thresholds, models
 
 
 def _summarize_diff(arr: np.ndarray) -> dict[str, float]:
@@ -128,22 +134,41 @@ def day_block_bootstrap_all_models(
         denom = 5 * tp_b + 4 * fn_b + fp_b
         f2_samples[name] = np.where(denom > 0, (5 * tp_b) / denom, 0.0)
 
-    # 2. Розрахунок PR-AUC на тих самих блоках діб
-    prauc_samples = {name: np.zeros(n_bootstraps) for name in probas_dict if "Naive" not in name}
-    p_by_day = {
-        name: [p_vals[idx] for idx in day_indices]
-        for name, p_vals in probas_dict.items()
-        if "Naive" not in name
-    }
+    # 2. Точний швидкий розрахунок PR-AUC на тих самих блоках діб (попереднє сортування 1 раз на модель)
+    day_weights = np.array(
+        [np.bincount(sampled_days[b], minlength=n_days) for b in range(n_bootstraps)],
+        dtype=np.float64,
+    )
+    non_naive_names = [name for name in probas_dict if "Naive" not in name]
+    y_true_f = y_true.astype(np.float64)
 
-    for b in range(n_bootstraps):
-        d_sel = sampled_days[b]
-        y_b = np.concatenate([y_by_day[d] for d in d_sel])
-        if y_b.sum() == 0:
-            continue
-        for name, p_day_list in p_by_day.items():
-            p_b = np.concatenate([p_day_list[d] for d in d_sel])
-            prauc_samples[name][b] = average_precision_score(y_b, p_b)
+    def _compute_model_prauc_boot(p_vals: np.ndarray) -> np.ndarray:
+        order = np.argsort(p_vals, kind="mergesort")[::-1]
+        p_s = p_vals[order]
+        y_s = y_true_f[order]
+        d_s = day_inverse[order]
+        thresh_idx = np.where(np.r_[np.diff(p_s) != 0, True])[0]
+
+        out = np.zeros(n_bootstraps, dtype=np.float64)
+        for b in range(n_bootstraps):
+            w_s = day_weights[b, d_s]
+            tp_cum = np.cumsum(y_s * w_s)[thresh_idx]
+            if tp_cum[-1] <= 0:
+                continue
+            tot_cum = np.cumsum(w_s)[thresh_idx]
+            keep = np.r_[tot_cum[0] > 0, np.diff(tot_cum) > 0]
+            tps = tp_cum[keep]
+            tots = tot_cum[keep]
+            prec = tps / tots
+            rec = tps / tps[-1]
+            d_rec = np.r_[rec[0], np.diff(rec)]
+            out[b] = float(np.sum(d_rec * prec))
+        return out
+
+    prauc_list = joblib.Parallel(n_jobs=-1, prefer="threads")(
+        joblib.delayed(_compute_model_prauc_boot)(probas_dict[name]) for name in non_naive_names
+    )
+    prauc_samples = dict(zip(non_naive_names, prauc_list))
 
     ci_results = {}
     for name in probas_dict:
@@ -288,14 +313,33 @@ def evaluate_slice(
 
 
 def run_test_evaluation():
-    """Проводить тестування всіх моделей (A, B, C, C') на 4 тестових зрізах та зберігає звіти."""
-    os.makedirs("reports/figures", exist_ok=True)
-    test_df, thresholds, models = load_test_data_and_models()
+    """Проводить оцінку всіх моделей (A, B, C, C') на Validation та 4 тестових зрізах із Day-Block Bootstrap (N=500)."""
+    os.makedirs("reports/official/figures", exist_ok=True)
+    val_df, test_df, thresholds, models = load_test_data_and_models()
+
+    y_val = val_df["target_onset_next_1h"].values
+    dates_val = val_df["date_kyiv"].values
+    n_val_days = len(np.unique(dates_val))
+    print(f"Розмір Val:  {len(val_df):,} годин ({n_val_days} діб), позитивних: {y_val.sum():,} ({y_val.mean():.4%})")
 
     y_test = test_df["target_onset_next_1h"].values
     dates_test = test_df["date_kyiv"].values
     n_unique_days = len(np.unique(dates_test))
     print(f"Розмір Test: {len(test_df):,} годин ({n_unique_days} діб), позитивних: {y_test.sum():,} ({y_test.mean():.4%})")
+
+    probas_val = {
+        "Baseline 1: True Naive Persistence": val_df["lagged_onset_1h"].values.astype(float),
+        "Baseline 2: Historical Lookup Table": val_df["lookup_prob"].values,
+        "Baseline 3: Adaptive 14-day Rolling": val_df["adaptive_rate_14d"].values,
+        "LogReg (Set A: No Spatial)": models["lr_a"].predict_proba(models["scaler_a"].transform(val_df[FEATURE_SET_A]))[:, 1],
+        "LogReg (Set B: With Spatial)": models["lr_b"].predict_proba(models["scaler_b"].transform(val_df[FEATURE_SET_B]))[:, 1],
+        "LogReg (Set C: Spatial + Adaptive)": models["lr_c"].predict_proba(models["scaler_c"].transform(val_df[FEATURE_SET_C]))[:, 1],
+        "LogReg (Set C': Adaptive + Lags)": models["lr_cp"].predict_proba(models["scaler_cp"].transform(val_df[FEATURE_SET_C_PRIME]))[:, 1],
+        "LightGBM (Set A: No Spatial)": models["lgb_a"].predict_proba(val_df[FEATURE_SET_A])[:, 1],
+        "LightGBM (Set B: With Spatial)": models["lgb_b"].predict_proba(val_df[FEATURE_SET_B])[:, 1],
+        "LightGBM (Set C: Spatial + Adaptive)": models["lgb_c"].predict_proba(val_df[FEATURE_SET_C])[:, 1],
+        "LightGBM (Set C': Adaptive + Lags)": models["lgb_cp"].predict_proba(val_df[FEATURE_SET_C_PRIME])[:, 1],
+    }
 
     probas = {
         "Baseline 1: True Naive Persistence": test_df["lagged_onset_1h"].values.astype(float),
@@ -331,17 +375,58 @@ def run_test_evaluation():
         "brier_score", "prec_at_adapt_recall",
     ]
 
+    # 0. VALIDATION (Day-Block Bootstrap N=500 + формальний вибір моделі за PR-AUC на Val)
+    print("🔄 0. Запуск парного Day-Block Bootstrap (500 ітерацій за добами) на Validation...")
+    df_val_results, val_paired_diffs, _ = evaluate_slice(
+        dates_val, y_val, probas_val, configs, n_bootstraps=500
+    )
+    df_val_results["threshold"] = df_val_results["frozen_threshold"]
+    prespec_mask = ~df_val_results["model"].str.contains("Set C'")
+    val_winner_idx = df_val_results.loc[prespec_mask, "pr_auc"].idxmax()
+    val_winner_model = str(df_val_results.loc[val_winner_idx, "model"])
+
+    def _status_label(m: str) -> str:
+        if m == val_winner_model:
+            return "pre-specified winner (selected on Val by PR-AUC)"
+        if "Set C'" in m:
+            return "post-hoc sensitivity experiment (Set C')"
+        return "pre-specified candidate"
+
+    df_val_results["selection_status"] = df_val_results["model"].map(_status_label)
+    df_val_results.to_csv("reports/official/ml_validation_benchmark.csv", index=False)
+
+    val_summary = {
+        "val_total_rows": int(len(val_df)),
+        "val_total_days": int(n_val_days),
+        "val_positives": int(y_val.sum()),
+        "val_base_rate": float(y_val.mean()),
+        "selection_rule": "arg max PR-AUC on Validation among pre-specified models (Sets A, B, C)",
+        "selected_model_on_val": val_winner_model,
+        "selected_model_val_pr_auc": float(df_val_results.loc[val_winner_idx, "pr_auc"]),
+        "selected_model_val_f2": float(df_val_results.loc[val_winner_idx, "f2_score"]),
+        "paired_day_bootstrap_500_val": val_paired_diffs,
+    }
+    with open("reports/official/val_evaluation_details.json", "w", encoding="utf-8") as f:
+        json.dump(val_summary, f, indent=2, ensure_ascii=False)
+
+    print("\n" + "=" * 115)
+    print("0. БЕНЧМАРК НА ВАЛІДАЦІЙНІЙ ВИБІРЦІ (VAL: 2024-05 — 2025-05, Day-Block Bootstrap N=500):")
+    print(f"   🏆 Переможець за правилом arg max Val PR-AUC: {val_winner_model}")
+    print("=" * 115)
+    print(df_val_results[cols_show + ["selection_status"]].to_string(index=False))
+
     # 1. ПОВНИЙ TEST
-    print("🔄 1. Запуск парного Day-Block Bootstrap (500 ітерацій за добами) на повному Test...")
+    print("\n🔄 1. Запуск парного Day-Block Bootstrap (500 ітерацій за добами) на повному Test...")
     df_results, paired_diffs, best_base_name = evaluate_slice(
         dates_test, y_test, probas, configs, n_bootstraps=500, fixed_ref_recall=0.7822716049382716
     )
-    df_results.to_csv("reports/ml_models_benchmark.csv", index=False)
+    df_results["selection_status"] = df_results["model"].map(_status_label)
+    df_results.to_csv("reports/official/ml_models_benchmark.csv", index=False)
 
     print("\n" + "=" * 115)
     print("1. ФІНАЛЬНИЙ БЕНЧМАРК НА ПОВНІЙ ТЕСТОВІЙ ВИБІРЦІ (TEST: 2025-06 — 2026-09, Day-Block Bootstrap N=500):")
     print("=" * 115)
-    print(df_results[cols_show].to_string(index=False))
+    print(df_results[cols_show + ["selection_status"]].to_string(index=False))
 
     print("\n📊 Парні різниці на повному Test (Day-Block Bootstrap N=500):")
     for k, v in paired_diffs.items():
@@ -361,16 +446,8 @@ def run_test_evaluation():
     df_pre, pre_diffs, _ = evaluate_slice(
         dates_pre, y_pre, probas_pre, configs, n_bootstraps=500, fixed_ref_recall=0.7822716049382716
     )
-    df_pre.to_csv("reports/ml_test_pre_aug2025_benchmark.csv", index=False)
+    df_pre.to_csv("reports/official/ml_test_pre_aug2025_benchmark.csv", index=False)
     print(df_pre[cols_show].to_string(index=False))
-    print("📊 Парні різниці на Test ДО 2025-08-01:")
-    for k in ["PRIMARY_lgb_C_minus_adaptive_prauc", "PRIMARY_lgb_C_minus_adaptive_f2",
-              "lgb_Cprime_minus_adaptive_prauc", "lgb_Cprime_minus_adaptive_f2",
-              "lgb_Cprime_minus_B_prauc", "lgb_Cprime_minus_B_f2",
-              "lgb_C_minus_B_prauc", "lgb_C_minus_B_f2",
-              "lr_Cprime_minus_adaptive_prauc", "lr_Cprime_minus_B_prauc"]:
-        v = pre_diffs[k]
-        print(f"   {k}: mean={v['mean']:+.4f}, 95% CI=[{v['ci_low']:+.4f}, {v['ci_high']:+.4f}]")
 
     # 3. TEST ПІСЛЯ 2025-08-01
     post_mask = (test_df["timestamp_utc"] >= aug_cutoff).values
@@ -385,16 +462,8 @@ def run_test_evaluation():
     df_post, post_diffs, _ = evaluate_slice(
         dates_post, y_post, probas_post, configs, n_bootstraps=500, fixed_ref_recall=0.7822716049382716
     )
-    df_post.to_csv("reports/ml_test_post_aug2025_benchmark.csv", index=False)
+    df_post.to_csv("reports/official/ml_test_post_aug2025_benchmark.csv", index=False)
     print(df_post[cols_show].to_string(index=False))
-    print("📊 Парні різниці на Test ПІСЛЯ 2025-08-01:")
-    for k in ["PRIMARY_lgb_C_minus_adaptive_prauc", "PRIMARY_lgb_C_minus_adaptive_f2",
-              "lgb_Cprime_minus_adaptive_prauc", "lgb_Cprime_minus_adaptive_f2",
-              "lgb_Cprime_minus_B_prauc", "lgb_Cprime_minus_B_f2",
-              "lgb_C_minus_B_prauc", "lgb_C_minus_B_f2",
-              "lr_Cprime_minus_adaptive_prauc", "lr_Cprime_minus_B_prauc"]:
-        v = post_diffs[k]
-        print(f"   {k}: mean={v['mean']:+.4f}, 95% CI=[{v['ci_low']:+.4f}, {v['ci_high']:+.4f}]")
 
     # 4. ОСТАННІ 60 ДНІВ
     test_max_time = test_df["timestamp_utc"].max()
@@ -411,19 +480,9 @@ def run_test_evaluation():
     df_recent, recent_diffs, _ = evaluate_slice(
         dates_recent, y_recent, probas_recent, configs, n_bootstraps=500, fixed_ref_recall=0.7822716049382716
     )
-    df_recent.to_csv("reports/ml_recent_60d_benchmark.csv", index=False)
+    df_recent.to_csv("reports/official/ml_recent_60d_benchmark.csv", index=False)
     print(df_recent[cols_show].to_string(index=False))
 
-    print("\n📊 Парні різниці на останніх 60 днях (Day-Block Bootstrap N=500):")
-    for k in ["PRIMARY_lgb_C_minus_adaptive_prauc", "PRIMARY_lgb_C_minus_adaptive_f2",
-              "lgb_Cprime_minus_adaptive_prauc", "lgb_Cprime_minus_adaptive_f2",
-              "lgb_Cprime_minus_B_prauc", "lgb_Cprime_minus_B_f2",
-              "lgb_C_minus_B_prauc", "lgb_C_minus_B_f2",
-              "lr_Cprime_minus_adaptive_prauc", "lr_Cprime_minus_B_prauc"]:
-        v = recent_diffs[k]
-        print(f"   {k}: mean={v['mean']:+.4f}, 95% CI=[{v['ci_low']:+.4f}, {v['ci_high']:+.4f}]")
-
-    # Distribution of predicted probabilities for LightGBM (Set C and Set C')
     lgb_p_c = probas["LightGBM (Set C: Spatial + Adaptive)"]
     quantiles_c = np.quantile(lgb_p_c, [0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99])
 
@@ -441,6 +500,7 @@ def run_test_evaluation():
         "recent_60d_rows": int(recent_mask.sum()),
         "recent_60d_positives": int(y_recent.sum()),
         "recent_60d_base_rate": float(y_recent.mean()),
+        "selected_model_on_val": val_winner_model,
         "paired_day_bootstrap_500_test": paired_diffs,
         "paired_day_bootstrap_500_pre_aug2025": pre_diffs,
         "paired_day_bootstrap_500_post_aug2025": post_diffs,
@@ -455,7 +515,7 @@ def run_test_evaluation():
             "q99": float(quantiles_c[6]),
         },
     }
-    with open("reports/test_evaluation_details.json", "w", encoding="utf-8") as f:
+    with open("reports/official/test_evaluation_details.json", "w", encoding="utf-8") as f:
         json.dump(stats_summary, f, indent=2, ensure_ascii=False)
 
     # Feature Importance для LightGBM (Set C)
@@ -495,15 +555,38 @@ def run_test_evaluation():
         "split": importance_split,
     }).sort_values("gain", ascending=False)
 
-    df_imp.to_csv("reports/feature_importance_lightgbm.csv", index=False)
+    df_imp.to_csv("reports/official/feature_importance_lightgbm.csv", index=False)
 
-    plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_results, best_base_name)
+    plot_test_figures(
+        y_test,
+        probas,
+        y_recent,
+        probas_recent,
+        df_imp,
+        df_results,
+        best_base_name,
+        figures_dir="reports/official/figures",
+        dataset_tag="",
+    )
     print("Всі графіки та звіти збережено успішно.")
 
 
-def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_results, best_base_name):
+def plot_test_figures(
+    y_test,
+    probas,
+    y_recent,
+    probas_recent,
+    df_imp,
+    df_results,
+    best_base_name,
+    figures_dir: str = "reports/official/figures",
+    dataset_tag: str = "",
+):
     """Створює графіки PR-кривих (повний Test + останні 60 днів), Feature Importance, Lift та Reliability Diagram."""
+    os.makedirs(figures_dir, exist_ok=True)
     plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
+
+    title_suffix = f" [{dataset_tag}]" if dataset_tag else ""
 
     colors = {
         "Baseline 2: Historical Lookup Table": "#7f7f7f",
@@ -545,7 +628,7 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
             color=colors.get(name, "black"),
             linewidth=2.3 if ("Set C" in name or "Adaptive" in name) else 1.5,
         )
-    ax1.set_title("А. Повний Test (червень 2025 – вересень 2026)", fontsize=12.5, fontweight="bold", pad=10)
+    ax1.set_title(f"А. Повний Test{title_suffix}", fontsize=12.5, fontweight="bold", pad=10)
     ax1.set_xlabel("Recall (Повнота виявлення)", fontsize=11)
     ax1.set_ylabel("Precision (Точність сповіщень)", fontsize=11)
     ax1.set_xlim([0.0, 1.0])
@@ -564,16 +647,16 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
             color=colors.get(name, "black"),
             linewidth=2.3 if ("Set C" in name or "Adaptive" in name) else 1.5,
         )
-    ax2.set_title("Б. Останні 60 днів (липень – вересень 2026)", fontsize=12.5, fontweight="bold", pad=10)
+    ax2.set_title(f"Б. Останні 60 днів{title_suffix}", fontsize=12.5, fontweight="bold", pad=10)
     ax2.set_xlabel("Recall (Повнота виявлення)", fontsize=11)
     ax2.set_ylabel("Precision (Точність сповіщень)", fontsize=11)
     ax2.set_xlim([0.0, 1.0])
     ax2.set_ylim([0.0, 1.02])
     ax2.legend(loc="upper right", frameon=True, fontsize=8.0)
 
-    fig.suptitle("Precision-Recall криві (Ablation A vs B vs C vs C'): Повний Test та останні 60 днів", fontsize=14, fontweight="bold")
+    fig.suptitle(f"Precision-Recall криві (Ablation A vs B vs C vs C'): Повний Test та останні 60 днів{title_suffix}", fontsize=14, fontweight="bold")
     fig.tight_layout()
-    fig.savefig("reports/figures/10_test_pr_curves_comparison.png")
+    fig.savefig(os.path.join(figures_dir, "10_test_pr_curves_comparison.png"))
     plt.close(fig)
 
     # Графік 2: Feature Importance (Gain) для LightGBM (Set C)
@@ -591,10 +674,10 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
             palette.append("#ff7f0e")
 
     ax.barh(top_imp["feature_ua"][::-1], (top_imp["gain"] / 1000)[::-1], color=palette[::-1], edgecolor="black", alpha=0.85)
-    ax.set_title("Важливість ознак у LightGBM Set C (Gain × 1,000)\nПросторові сигнали, адаптивна пам'ять та календар", fontsize=13, fontweight="bold", pad=12)
+    ax.set_title(f"Важливість ознак у LightGBM Set C (Gain × 1,000){title_suffix}\nПросторові сигнали, адаптивна пам'ять та календар", fontsize=13, fontweight="bold", pad=12)
     ax.set_xlabel("Total Gain (× 1,000)", fontsize=11)
     fig.tight_layout()
-    fig.savefig("reports/figures/11_feature_importance_lightgbm.png")
+    fig.savefig(os.path.join(figures_dir, "11_feature_importance_lightgbm.png"))
     plt.close(fig)
 
     # Графік 3: Lift над НАЙКРАЩИМ бейзлайном (Adaptive 14-day)
@@ -606,11 +689,13 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
     rects1 = ax.bar(x - width / 2, ml_models["lift_f2_over_best_baseline_pct"], width, label=f"Lift F2 (%) над {best_base_name}", color="#1f77b4", edgecolor="black")
     rects2 = ax.bar(x + width / 2, ml_models["lift_prauc_over_best_baseline_pct"], width, label=f"Lift PR-AUC (%) над {best_base_name}", color="#2ca02c", edgecolor="black")
 
-    ax.set_title(f"Відносна різниця метрик порівняно з найкращим бейзлайном ({best_base_name})", fontsize=12, fontweight="bold", pad=12)
+    ax.set_title(f"Відносна різниця метрик порівняно з найкращим бейзлайном ({best_base_name}){title_suffix}", fontsize=12, fontweight="bold", pad=12)
     ax.set_ylabel("Різниця (%)", fontsize=11)
     ax.set_xticks(x)
     ax.set_xticklabels(ml_models["model"], rotation=20, ha="right", fontsize=9)
-    ax.set_ylim([0, 33])
+    min_val = float(min(0.0, ml_models["lift_f2_over_best_baseline_pct"].min(), ml_models["lift_prauc_over_best_baseline_pct"].min()))
+    max_val = float(max(10.0, ml_models["lift_f2_over_best_baseline_pct"].max(), ml_models["lift_prauc_over_best_baseline_pct"].max()))
+    ax.set_ylim([min_val - 5.0 if min_val < 0 else 0.0, max_val + 6.0])
     ax.axhline(0, color="gray", linestyle="--")
     ax.legend(frameon=True, fontsize=10)
 
@@ -624,7 +709,7 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
                     textcoords="offset points", ha="center", va="bottom", fontsize=8, fontweight="bold")
 
     fig.tight_layout()
-    fig.savefig("reports/figures/12_lift_over_baselines.png")
+    fig.savefig(os.path.join(figures_dir, "12_lift_over_baselines.png"))
     plt.close(fig)
 
     # Графік 4: Reliability Diagram (Калібрувальна крива для LightGBM Set B, Set C, Set C')
@@ -637,14 +722,14 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
         prob_true, prob_pred = calibration_curve(y_test, probas[m_label], n_bins=10)
         ax.plot(prob_pred, prob_true, marker=marker, linewidth=2, color=color, label=m_label)
     ax.plot([0, 1], [0, 1], linestyle="--", color="gray", label="Ідеальне калібрування")
-    ax.set_title("Reliability Diagram (Калібрування ймовірностей LightGBM на Test)", fontsize=13, fontweight="bold", pad=12)
+    ax.set_title(f"Reliability Diagram (Калібрування ймовірностей LightGBM на Test){title_suffix}", fontsize=13, fontweight="bold", pad=12)
     ax.set_xlabel("Прогнозована ймовірність", fontsize=11)
     ax.set_ylabel("Фактична частка подій", fontsize=11)
     ax.set_xlim([0.0, 0.70])
     ax.set_ylim([0.0, 0.70])
     ax.legend(loc="upper left", frameon=True, fontsize=9)
     fig.tight_layout()
-    fig.savefig("reports/figures/13_calibration_reliability_diagram.png")
+    fig.savefig(os.path.join(figures_dir, "13_calibration_reliability_diagram.png"))
     plt.close(fig)
 
 

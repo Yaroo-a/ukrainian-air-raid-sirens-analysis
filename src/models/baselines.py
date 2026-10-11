@@ -72,7 +72,7 @@ def evaluate_threshold_search(y_true, y_prob, thresholds=None):
 
 def run_baselines_evaluation(
     ml_features_parquet: str | Path = "data/processed/ml_features_hourly.parquet",
-    output_dir: str | Path = "reports",
+    output_dir: str | Path = "reports/official",
 ):
     """Runs full baseline evaluation on Train/Val."""
     out_dir = Path(output_dir)
