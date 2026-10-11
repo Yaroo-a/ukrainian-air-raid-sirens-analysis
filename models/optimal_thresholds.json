@@ -5,7 +5,9 @@
   "LogReg (Set A: No Spatial)": 0.5175862068965517,
   "LogReg (Set B: With Spatial)": 0.5612068965517241,
   "LogReg (Set C: Spatial + Adaptive)": 0.5651724137931033,
+  "LogReg (Set C': Adaptive + Lags)": 0.5413793103448276,
   "LightGBM (Set A: No Spatial)": 0.0932758620689655,
   "LightGBM (Set B: With Spatial)": 0.10913793103448274,
-  "LightGBM (Set C: Spatial + Adaptive)": 0.1289655172413793
+  "LightGBM (Set C: Spatial + Adaptive)": 0.1289655172413793,
+  "LightGBM (Set C': Adaptive + Lags)": 0.1289655172413793
 }

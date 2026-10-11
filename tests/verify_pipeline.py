@@ -70,10 +70,14 @@ def verify_pipeline():
         ("regional_clusters_summary.csv", 24),
         ("clusters_train_only.csv", 24),
         ("spatial_lead_lag_summary.csv", 49),
+        ("feature_shift_summary.csv", 10),
+        ("feature_shift_test_subperiods.csv", 10),
         ("baselines_benchmark.csv", 3),
-        ("ml_validation_benchmark.csv", 9),
-        ("ml_models_benchmark.csv", 9),
-        ("ml_recent_60d_benchmark.csv", 9),
+        ("ml_validation_benchmark.csv", 11),
+        ("ml_models_benchmark.csv", 11),
+        ("ml_test_pre_aug2025_benchmark.csv", 11),
+        ("ml_test_post_aug2025_benchmark.csv", 11),
+        ("ml_recent_60d_benchmark.csv", 11),
         ("feature_importance_lightgbm.csv", 22),
     ]
     for csv_name, min_rows in expected_csvs:

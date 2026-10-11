@@ -1,14 +1,15 @@
-"""Модуль фінальної оцінки на вибірці Test (червень 2025 - вересень 2026) та останніх 60 днях (Фаза 2.4 - A, B, C).
+"""Модуль фінальної оцінки на вибірці Test (повний Test, до/після 2025-08-01 та останні 60 днів) для A, B, C, C'.
 
 Реалізує:
-1. Заздалегідь зафіксоване головне порівняння: LightGBM (Set C: Spatial + Adaptive) проти Adaptive 14-day Rolling Baseline.
-2. Повний Ablation Study наборів ознак A vs B vs C для LightGBM та Logistic Regression із зафіксованими на Validation порогами p*.
-3. Узгодження часових поясів (Київський час dt.tz_convert("Europe/Kyiv").dt.hour ідентично до Val).
-4. Оцінку True Naive Persistence [T-1h, T), Historical Lookup та Adaptive 14-day Rolling Baseline.
-5. Чесний Block Bootstrap за календарними добами (n_bootstraps=500) для 95% CI PR-AUC, F2 та парних різниць (B-A, C-B, C-A, C-Adaptive).
-6. Порівняння моделей при фіксованому Recall та фіксованому Precision (на рівні Adaptive 14-day Baseline).
-7. Повну оцінку на останніх 60 днях із збереженням у reports/ml_recent_60d_benchmark.csv та побудовою PR-кривих.
-8. Reliability Diagram (калібрувальна крива) та квантилі прогнозованих імовірностей LightGBM (Set C).
+1. Заздалегідь зафіксоване головне порівняння: LightGBM (Set C) проти Adaptive 14-day Rolling Baseline.
+2. Додатковий експеримент Set C' (B + adaptive_rate_7d/14d/30d + neighbors_active_lag_1h/2h/3h, без national_active_count,
+   hours_since_last_alert та onsets_last_24h) для перевірки гіпотези про зсув розподілу ознак.
+3. Оцінку на 4 часових зрізах Test із замороженими порогами p* з Validation:
+   - Повний Test (2025-06-01 — 2026-09-07) -> reports/ml_models_benchmark.csv
+   - Test до 2025-08-01 (2025-06-01 — 2025-07-31) -> reports/ml_test_pre_aug2025_benchmark.csv
+   - Test з 2025-08-01 (2025-08-01 — 2026-09-07) -> reports/ml_test_post_aug2025_benchmark.csv
+   - Останні 60 днів (2026-07-09 — 2026-09-07) -> reports/ml_recent_60d_benchmark.csv
+4. Парний Block Bootstrap за календарними добами (n_bootstraps=500) для 95% CI PR-AUC, F2 та парних різниць.
 """
 
 import os
@@ -34,11 +35,16 @@ from sklearn.metrics import (
 )
 from sklearn.calibration import calibration_curve
 
-from src.models.train_models import FEATURE_SET_A, FEATURE_SET_B, FEATURE_SET_C
+from src.models.train_models import (
+    FEATURE_SET_A,
+    FEATURE_SET_B,
+    FEATURE_SET_C,
+    FEATURE_SET_C_PRIME,
+)
 
 
 def load_test_data_and_models(parquet_path: str = "data/processed/ml_features_hourly.parquet"):
-    """Завантажує тестовий набір даних, таблицю бейзлайну та натреновані моделі (A, B, C)."""
+    """Завантажує тестовий набір даних, таблицю бейзлайну та натреновані моделі (A, B, C, C')."""
     print("Завантаження даних та моделей...")
     df = pd.read_parquet(parquet_path)
     train_df = df[df["split_set"] == "train"].copy()
@@ -67,12 +73,15 @@ def load_test_data_and_models(parquet_path: str = "data/processed/ml_features_ho
         "scaler_a": joblib.load("models/scaler_nospatial.joblib"),
         "scaler_b": joblib.load("models/scaler_spatial.joblib"),
         "scaler_c": joblib.load("models/scaler_adaptive.joblib"),
+        "scaler_cp": joblib.load("models/scaler_c_prime.joblib"),
         "lr_a": joblib.load("models/logreg_nospatial.joblib"),
         "lr_b": joblib.load("models/logreg_spatial.joblib"),
         "lr_c": joblib.load("models/logreg_adaptive.joblib"),
+        "lr_cp": joblib.load("models/logreg_c_prime.joblib"),
         "lgb_a": joblib.load("models/lightgbm_nospatial.joblib"),
         "lgb_b": joblib.load("models/lightgbm_spatial.joblib"),
         "lgb_c": joblib.load("models/lightgbm_adaptive.joblib"),
+        "lgb_cp": joblib.load("models/lightgbm_c_prime.joblib"),
     }
 
     return test_merged, thresholds, models
@@ -156,24 +165,37 @@ def day_block_bootstrap_all_models(
             }
 
     adapt = "Baseline 3: Adaptive 14-day Rolling"
-    lgb_a, lgb_b, lgb_c = (
+    lgb_a, lgb_b, lgb_c, lgb_cp = (
         "LightGBM (Set A: No Spatial)",
         "LightGBM (Set B: With Spatial)",
         "LightGBM (Set C: Spatial + Adaptive)",
+        "LightGBM (Set C': Adaptive + Lags)",
     )
-    lr_a, lr_b, lr_c = (
+    lr_a, lr_b, lr_c, lr_cp = (
         "LogReg (Set A: No Spatial)",
         "LogReg (Set B: With Spatial)",
         "LogReg (Set C: Spatial + Adaptive)",
+        "LogReg (Set C': Adaptive + Lags)",
     )
 
     paired_diffs = {
         # Головне заздалегідь зафіксоване порівняння: LightGBM (Set C) vs Adaptive 14-day
         "PRIMARY_lgb_C_minus_adaptive_prauc": _summarize_diff(prauc_samples[lgb_c] - prauc_samples[adapt]),
         "PRIMARY_lgb_C_minus_adaptive_f2": _summarize_diff(f2_samples[lgb_c] - f2_samples[adapt]),
-        # LogReg (Set C) vs Adaptive 14-day
+        # LightGBM (Set C') vs Adaptive 14-day та vs Set B і Set C
+        "lgb_Cprime_minus_adaptive_prauc": _summarize_diff(prauc_samples[lgb_cp] - prauc_samples[adapt]),
+        "lgb_Cprime_minus_adaptive_f2": _summarize_diff(f2_samples[lgb_cp] - f2_samples[adapt]),
+        "lgb_Cprime_minus_B_prauc": _summarize_diff(prauc_samples[lgb_cp] - prauc_samples[lgb_b]),
+        "lgb_Cprime_minus_B_f2": _summarize_diff(f2_samples[lgb_cp] - f2_samples[lgb_b]),
+        "lgb_Cprime_minus_C_prauc": _summarize_diff(prauc_samples[lgb_cp] - prauc_samples[lgb_c]),
+        "lgb_Cprime_minus_C_f2": _summarize_diff(f2_samples[lgb_cp] - f2_samples[lgb_c]),
+        # LogReg (Set C та Set C') vs Adaptive 14-day та vs Set B
         "lr_C_minus_adaptive_prauc": _summarize_diff(prauc_samples[lr_c] - prauc_samples[adapt]),
         "lr_C_minus_adaptive_f2": _summarize_diff(f2_samples[lr_c] - f2_samples[adapt]),
+        "lr_Cprime_minus_adaptive_prauc": _summarize_diff(prauc_samples[lr_cp] - prauc_samples[adapt]),
+        "lr_Cprime_minus_adaptive_f2": _summarize_diff(f2_samples[lr_cp] - f2_samples[adapt]),
+        "lr_Cprime_minus_B_prauc": _summarize_diff(prauc_samples[lr_cp] - prauc_samples[lr_b]),
+        "lr_Cprime_minus_B_f2": _summarize_diff(f2_samples[lr_cp] - f2_samples[lr_b]),
         # LightGBM Ablation: B-A, C-B, C-A
         "lgb_B_minus_A_prauc": _summarize_diff(prauc_samples[lgb_b] - prauc_samples[lgb_a]),
         "lgb_B_minus_A_f2": _summarize_diff(f2_samples[lgb_b] - f2_samples[lgb_a]),
@@ -210,8 +232,9 @@ def evaluate_slice(
     probas: dict[str, np.ndarray],
     configs: list[tuple[str, str, float]],
     n_bootstraps: int = 500,
+    fixed_ref_recall: float | None = None,
 ) -> tuple[pd.DataFrame, dict, str]:
-    """Оцінює всі моделі на заданому часовому зрізі (Test або останні 60 днів)."""
+    """Оцінює всі моделі на заданому часовому зрізі."""
     th_map = {name: th for name, _, th in configs}
     ci_map, paired_diffs = day_block_bootstrap_all_models(
         dates_array, y_true, probas, th_map, n_bootstraps=n_bootstraps
@@ -219,8 +242,8 @@ def evaluate_slice(
 
     adapt_name = "Baseline 3: Adaptive 14-day Rolling"
     adapt_preds = (probas[adapt_name] >= th_map[adapt_name]).astype(int)
-    ref_recall = recall_score(y_true, adapt_preds, zero_division=0)
-    ref_precision = precision_score(y_true, adapt_preds, zero_division=0)
+    ref_recall = float(fixed_ref_recall) if fixed_ref_recall is not None else float(recall_score(y_true, adapt_preds, zero_division=0))
+    ref_precision = float(precision_score(y_true, adapt_preds, zero_division=0))
 
     rows = []
     for name, fset, th in configs:
@@ -265,7 +288,7 @@ def evaluate_slice(
 
 
 def run_test_evaluation():
-    """Проводить тестування всіх моделей (A, B, C) на Test і останніх 60 днях та зберігає звіти."""
+    """Проводить тестування всіх моделей (A, B, C, C') на 4 тестових зрізах та зберігає звіти."""
     os.makedirs("reports/figures", exist_ok=True)
     test_df, thresholds, models = load_test_data_and_models()
 
@@ -281,9 +304,11 @@ def run_test_evaluation():
         "LogReg (Set A: No Spatial)": models["lr_a"].predict_proba(models["scaler_a"].transform(test_df[FEATURE_SET_A]))[:, 1],
         "LogReg (Set B: With Spatial)": models["lr_b"].predict_proba(models["scaler_b"].transform(test_df[FEATURE_SET_B]))[:, 1],
         "LogReg (Set C: Spatial + Adaptive)": models["lr_c"].predict_proba(models["scaler_c"].transform(test_df[FEATURE_SET_C]))[:, 1],
+        "LogReg (Set C': Adaptive + Lags)": models["lr_cp"].predict_proba(models["scaler_cp"].transform(test_df[FEATURE_SET_C_PRIME]))[:, 1],
         "LightGBM (Set A: No Spatial)": models["lgb_a"].predict_proba(test_df[FEATURE_SET_A])[:, 1],
         "LightGBM (Set B: With Spatial)": models["lgb_b"].predict_proba(test_df[FEATURE_SET_B])[:, 1],
         "LightGBM (Set C: Spatial + Adaptive)": models["lgb_c"].predict_proba(test_df[FEATURE_SET_C])[:, 1],
+        "LightGBM (Set C': Adaptive + Lags)": models["lgb_cp"].predict_proba(test_df[FEATURE_SET_C_PRIME])[:, 1],
     }
 
     configs = [
@@ -292,42 +317,86 @@ def run_test_evaluation():
         ("Baseline 3: Adaptive 14-day Rolling", "None", thresholds["Baseline 3: Adaptive 14-day Rolling"]),
         ("LogReg (Set A: No Spatial)", "A (Time, Burden & Cluster)", thresholds["LogReg (Set A: No Spatial)"]),
         ("LogReg (Set B: With Spatial)", "B (A + Spatial at T)", thresholds["LogReg (Set B: With Spatial)"]),
-        ("LogReg (Set C: Spatial + Adaptive)", "C (B + Adaptive & Lags)", thresholds["LogReg (Set C: Spatial + Adaptive)"]),
+        ("LogReg (Set C: Spatial + Adaptive)", "C (B + Adaptive, Nat & Lags)", thresholds["LogReg (Set C: Spatial + Adaptive)"]),
+        ("LogReg (Set C': Adaptive + Lags)", "C' (B + Adaptive & Lags only)", thresholds["LogReg (Set C': Adaptive + Lags)"]),
         ("LightGBM (Set A: No Spatial)", "A (Time, Burden & Cluster)", thresholds["LightGBM (Set A: No Spatial)"]),
         ("LightGBM (Set B: With Spatial)", "B (A + Spatial at T)", thresholds["LightGBM (Set B: With Spatial)"]),
-        ("LightGBM (Set C: Spatial + Adaptive)", "C (B + Adaptive & Lags)", thresholds["LightGBM (Set C: Spatial + Adaptive)"]),
+        ("LightGBM (Set C: Spatial + Adaptive)", "C (B + Adaptive, Nat & Lags)", thresholds["LightGBM (Set C: Spatial + Adaptive)"]),
+        ("LightGBM (Set C': Adaptive + Lags)", "C' (B + Adaptive & Lags only)", thresholds["LightGBM (Set C': Adaptive + Lags)"]),
     ]
 
-    print("🔄 Запуск парного Day-Block Bootstrap (500 ітерацій за добами) на повному Test...")
-    df_results, paired_diffs, best_base_name = evaluate_slice(
-        dates_test, y_test, probas, configs, n_bootstraps=500
-    )
-    df_results.to_csv("reports/ml_models_benchmark.csv", index=False)
-
-    print("\n" + "=" * 110)
-    print("ФІНАЛЬНИЙ БЕНЧМАРК НА ТЕСТОВІЙ ВИБІРЦІ (TEST: 2025-06 — 2026-09, Day-Block Bootstrap N=500):")
-    print("=" * 110)
     cols_show = [
         "model", "frozen_threshold", "precision", "recall",
         "f2_score", "f2_ci_95", "pr_auc", "pr_auc_ci_95",
         "brier_score", "prec_at_adapt_recall",
     ]
+
+    # 1. ПОВНИЙ TEST
+    print("🔄 1. Запуск парного Day-Block Bootstrap (500 ітерацій за добами) на повному Test...")
+    df_results, paired_diffs, best_base_name = evaluate_slice(
+        dates_test, y_test, probas, configs, n_bootstraps=500, fixed_ref_recall=0.7822716049382716
+    )
+    df_results.to_csv("reports/ml_models_benchmark.csv", index=False)
+
+    print("\n" + "=" * 115)
+    print("1. ФІНАЛЬНИЙ БЕНЧМАРК НА ПОВНІЙ ТЕСТОВІЙ ВИБІРЦІ (TEST: 2025-06 — 2026-09, Day-Block Bootstrap N=500):")
+    print("=" * 115)
     print(df_results[cols_show].to_string(index=False))
 
-    print("\n📊 Заздалегідь зафіксоване головне порівняння та Ablation (Day-Block Bootstrap N=500 на Test):")
+    print("\n📊 Парні різниці на повному Test (Day-Block Bootstrap N=500):")
     for k, v in paired_diffs.items():
         print(f"   {k}: mean={v['mean']:+.4f}, 95% CI=[{v['ci_low']:+.4f}, {v['ci_high']:+.4f}]")
 
-    # Distribution of predicted probabilities for LightGBM (Set C)
-    lgb_p_c = probas["LightGBM (Set C: Spatial + Adaptive)"]
-    quantiles_c = np.quantile(lgb_p_c, [0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99])
-    print("\n📈 Квантилі прогнозованих імовірностей LightGBM (Set C: Spatial + Adaptive) на Test:")
-    print(
-        f"   Q10={quantiles_c[0]:.4f}, Q25={quantiles_c[1]:.4f}, Median={quantiles_c[2]:.4f}, "
-        f"Q75={quantiles_c[3]:.4f}, Q90={quantiles_c[4]:.4f}, Q95={quantiles_c[5]:.4f}, Q99={quantiles_c[6]:.4f}"
-    )
+    # 2. TEST ДО 2025-08-01
+    aug_cutoff = pd.Timestamp("2025-08-01 00:00:00", tz="UTC")
+    pre_mask = (test_df["timestamp_utc"] < aug_cutoff).values
+    y_pre = y_test[pre_mask]
+    dates_pre = dates_test[pre_mask]
+    probas_pre = {k: v[pre_mask] for k, v in probas.items()}
 
-    # Оцінка на останніх 60 днях
+    print(
+        f"\n⏱️ 2. Оцінка на Test ДО 2025-08-01 (2025-06-01 — 2025-07-31, "
+        f"рядків: {pre_mask.sum():,}, діб: {len(np.unique(dates_pre))}, стартів: {y_pre.sum():,}, базова частка: {y_pre.mean():.4%}):"
+    )
+    df_pre, pre_diffs, _ = evaluate_slice(
+        dates_pre, y_pre, probas_pre, configs, n_bootstraps=500, fixed_ref_recall=0.7822716049382716
+    )
+    df_pre.to_csv("reports/ml_test_pre_aug2025_benchmark.csv", index=False)
+    print(df_pre[cols_show].to_string(index=False))
+    print("📊 Парні різниці на Test ДО 2025-08-01:")
+    for k in ["PRIMARY_lgb_C_minus_adaptive_prauc", "PRIMARY_lgb_C_minus_adaptive_f2",
+              "lgb_Cprime_minus_adaptive_prauc", "lgb_Cprime_minus_adaptive_f2",
+              "lgb_Cprime_minus_B_prauc", "lgb_Cprime_minus_B_f2",
+              "lgb_C_minus_B_prauc", "lgb_C_minus_B_f2",
+              "lr_Cprime_minus_adaptive_prauc", "lr_Cprime_minus_B_prauc"]:
+        v = pre_diffs[k]
+        print(f"   {k}: mean={v['mean']:+.4f}, 95% CI=[{v['ci_low']:+.4f}, {v['ci_high']:+.4f}]")
+
+    # 3. TEST ПІСЛЯ 2025-08-01
+    post_mask = (test_df["timestamp_utc"] >= aug_cutoff).values
+    y_post = y_test[post_mask]
+    dates_post = dates_test[post_mask]
+    probas_post = {k: v[post_mask] for k, v in probas.items()}
+
+    print(
+        f"\n⏱️ 3. Оцінка на Test ПІСЛЯ 2025-08-01 (2025-08-01 — 2026-09-07, "
+        f"рядків: {post_mask.sum():,}, діб: {len(np.unique(dates_post))}, стартів: {y_post.sum():,}, базова частка: {y_post.mean():.4%}):"
+    )
+    df_post, post_diffs, _ = evaluate_slice(
+        dates_post, y_post, probas_post, configs, n_bootstraps=500, fixed_ref_recall=0.7822716049382716
+    )
+    df_post.to_csv("reports/ml_test_post_aug2025_benchmark.csv", index=False)
+    print(df_post[cols_show].to_string(index=False))
+    print("📊 Парні різниці на Test ПІСЛЯ 2025-08-01:")
+    for k in ["PRIMARY_lgb_C_minus_adaptive_prauc", "PRIMARY_lgb_C_minus_adaptive_f2",
+              "lgb_Cprime_minus_adaptive_prauc", "lgb_Cprime_minus_adaptive_f2",
+              "lgb_Cprime_minus_B_prauc", "lgb_Cprime_minus_B_f2",
+              "lgb_C_minus_B_prauc", "lgb_C_minus_B_f2",
+              "lr_Cprime_minus_adaptive_prauc", "lr_Cprime_minus_B_prauc"]:
+        v = post_diffs[k]
+        print(f"   {k}: mean={v['mean']:+.4f}, 95% CI=[{v['ci_low']:+.4f}, {v['ci_high']:+.4f}]")
+
+    # 4. ОСТАННІ 60 ДНІВ
     test_max_time = test_df["timestamp_utc"].max()
     recent_cutoff = test_max_time - pd.Timedelta(days=60)
     recent_mask = (test_df["timestamp_utc"] >= recent_cutoff).values
@@ -336,28 +405,45 @@ def run_test_evaluation():
     probas_recent = {k: v[recent_mask] for k, v in probas.items()}
 
     print(
-        f"\n⏱️ Оцінка на останніх 60 днях ({recent_cutoff.date()} — {test_max_time.date()}, "
+        f"\n⏱️ 4. Оцінка на останніх 60 днях ({recent_cutoff.date()} — {test_max_time.date()}, "
         f"рядків: {recent_mask.sum():,}, стартів: {y_recent.sum():,}, базова частка: {y_recent.mean():.4%}):"
     )
     df_recent, recent_diffs, _ = evaluate_slice(
-        dates_recent, y_recent, probas_recent, configs, n_bootstraps=500
+        dates_recent, y_recent, probas_recent, configs, n_bootstraps=500, fixed_ref_recall=0.7822716049382716
     )
     df_recent.to_csv("reports/ml_recent_60d_benchmark.csv", index=False)
     print(df_recent[cols_show].to_string(index=False))
 
     print("\n📊 Парні різниці на останніх 60 днях (Day-Block Bootstrap N=500):")
-    for k, v in recent_diffs.items():
+    for k in ["PRIMARY_lgb_C_minus_adaptive_prauc", "PRIMARY_lgb_C_minus_adaptive_f2",
+              "lgb_Cprime_minus_adaptive_prauc", "lgb_Cprime_minus_adaptive_f2",
+              "lgb_Cprime_minus_B_prauc", "lgb_Cprime_minus_B_f2",
+              "lgb_C_minus_B_prauc", "lgb_C_minus_B_f2",
+              "lr_Cprime_minus_adaptive_prauc", "lr_Cprime_minus_B_prauc"]:
+        v = recent_diffs[k]
         print(f"   {k}: mean={v['mean']:+.4f}, 95% CI=[{v['ci_low']:+.4f}, {v['ci_high']:+.4f}]")
+
+    # Distribution of predicted probabilities for LightGBM (Set C and Set C')
+    lgb_p_c = probas["LightGBM (Set C: Spatial + Adaptive)"]
+    quantiles_c = np.quantile(lgb_p_c, [0.10, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99])
 
     stats_summary = {
         "test_total_rows": int(len(test_df)),
         "test_total_days": int(n_unique_days),
         "test_positives": int(y_test.sum()),
         "test_base_rate": float(y_test.mean()),
+        "test_pre_aug2025_rows": int(pre_mask.sum()),
+        "test_pre_aug2025_positives": int(y_pre.sum()),
+        "test_pre_aug2025_base_rate": float(y_pre.mean()),
+        "test_post_aug2025_rows": int(post_mask.sum()),
+        "test_post_aug2025_positives": int(y_post.sum()),
+        "test_post_aug2025_base_rate": float(y_post.mean()),
         "recent_60d_rows": int(recent_mask.sum()),
         "recent_60d_positives": int(y_recent.sum()),
         "recent_60d_base_rate": float(y_recent.mean()),
         "paired_day_bootstrap_500_test": paired_diffs,
+        "paired_day_bootstrap_500_pre_aug2025": pre_diffs,
+        "paired_day_bootstrap_500_post_aug2025": post_diffs,
         "paired_day_bootstrap_500_recent_60d": recent_diffs,
         "lgb_set_c_prob_quantiles": {
             "q10": float(quantiles_c[0]),
@@ -372,7 +458,7 @@ def run_test_evaluation():
     with open("reports/test_evaluation_details.json", "w", encoding="utf-8") as f:
         json.dump(stats_summary, f, indent=2, ensure_ascii=False)
 
-    # Feature Importance для головної моделі LightGBM (Set C)
+    # Feature Importance для LightGBM (Set C)
     lgb_c_model = models["lgb_c"]
     importance_gain = lgb_c_model.booster_.feature_importance(importance_type="gain")
     importance_split = lgb_c_model.booster_.feature_importance(importance_type="split")
@@ -425,9 +511,11 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
         "LogReg (Set A: No Spatial)": "#9ecae1",
         "LogReg (Set B: With Spatial)": "#3182bd",
         "LogReg (Set C: Spatial + Adaptive)": "#08519c",
+        "LogReg (Set C': Adaptive + Lags)": "#6a51a3",
         "LightGBM (Set A: No Spatial)": "#fdae6b",
         "LightGBM (Set B: With Spatial)": "#e6550d",
         "LightGBM (Set C: Spatial + Adaptive)": "#d62728",
+        "LightGBM (Set C': Adaptive + Lags)": "#8c2d04",
     }
     model_order = [
         "Baseline 2: Historical Lookup Table",
@@ -435,13 +523,15 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
         "LogReg (Set A: No Spatial)",
         "LogReg (Set B: With Spatial)",
         "LogReg (Set C: Spatial + Adaptive)",
+        "LogReg (Set C': Adaptive + Lags)",
         "LightGBM (Set A: No Spatial)",
         "LightGBM (Set B: With Spatial)",
         "LightGBM (Set C: Spatial + Adaptive)",
+        "LightGBM (Set C': Adaptive + Lags)",
     ]
 
     # Графік 1: Двопанельні Precision-Recall Curves (Повний Test та Останні 60 днів)
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16.5, 6.8), dpi=300)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(17, 7.2), dpi=300)
 
     base_rate_test = np.mean(y_test)
     ax1.axhline(base_rate_test, color="darkgray", linestyle="--", label=f"Base rate = {base_rate_test:.2%}")
@@ -453,14 +543,14 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
             rec, prec,
             label=f"{name} (PR-AUC = {auc_score:.4f})",
             color=colors.get(name, "black"),
-            linewidth=2.5 if ("Set C" in name or "Adaptive" in name) else 1.6,
+            linewidth=2.3 if ("Set C" in name or "Adaptive" in name) else 1.5,
         )
     ax1.set_title("А. Повний Test (червень 2025 – вересень 2026)", fontsize=12.5, fontweight="bold", pad=10)
     ax1.set_xlabel("Recall (Повнота виявлення)", fontsize=11)
     ax1.set_ylabel("Precision (Точність сповіщень)", fontsize=11)
     ax1.set_xlim([0.0, 1.0])
     ax1.set_ylim([0.0, 0.70])
-    ax1.legend(loc="upper right", frameon=True, fontsize=8.5)
+    ax1.legend(loc="upper right", frameon=True, fontsize=8.0)
 
     base_rate_rec = np.mean(y_recent)
     ax2.axhline(base_rate_rec, color="darkgray", linestyle="--", label=f"Base rate = {base_rate_rec:.2%}")
@@ -472,16 +562,16 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
             rec, prec,
             label=f"{name} (PR-AUC = {auc_score:.4f})",
             color=colors.get(name, "black"),
-            linewidth=2.5 if ("Set C" in name or "Adaptive" in name) else 1.6,
+            linewidth=2.3 if ("Set C" in name or "Adaptive" in name) else 1.5,
         )
     ax2.set_title("Б. Останні 60 днів (липень – вересень 2026)", fontsize=12.5, fontweight="bold", pad=10)
     ax2.set_xlabel("Recall (Повнота виявлення)", fontsize=11)
     ax2.set_ylabel("Precision (Точність сповіщень)", fontsize=11)
     ax2.set_xlim([0.0, 1.0])
     ax2.set_ylim([0.0, 0.70])
-    ax2.legend(loc="upper right", frameon=True, fontsize=8.5)
+    ax2.legend(loc="upper right", frameon=True, fontsize=8.0)
 
-    fig.suptitle("Precision-Recall криві (Ablation A vs B vs C): Повний Test та останні 60 днів", fontsize=14, fontweight="bold")
+    fig.suptitle("Precision-Recall криві (Ablation A vs B vs C vs C'): Повний Test та останні 60 днів", fontsize=14, fontweight="bold")
     fig.tight_layout()
     fig.savefig("reports/figures/10_test_pr_curves_comparison.png")
     plt.close(fig)
@@ -492,13 +582,13 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
     palette = []
     for f in top_imp["feature"]:
         if "neighbor" in f or "national" in f:
-            palette.append("#d62728")  # Просторові та загальнонаціональні
+            palette.append("#d62728")
         elif "adaptive" in f or "hours_since" in f or "onsets_last" in f or "burden" in f:
-            palette.append("#1f77b4")  # Адаптивна пам'ять та локальна динаміка
+            palette.append("#1f77b4")
         elif "cluster" in f:
-            palette.append("#2ca02c")  # Статичні Train-кластери
+            palette.append("#2ca02c")
         else:
-            palette.append("#ff7f0e")  # Календарні цикли
+            palette.append("#ff7f0e")
 
     ax.barh(top_imp["feature_ua"][::-1], (top_imp["gain"] / 1000)[::-1], color=palette[::-1], edgecolor="black", alpha=0.85)
     ax.set_title("Важливість ознак у LightGBM Set C (Gain × 1,000)\nПросторові сигнали, адаптивна пам'ять та календар", fontsize=13, fontweight="bold", pad=12)
@@ -508,7 +598,7 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
     plt.close(fig)
 
     # Графік 3: Lift над НАЙКРАЩИМ бейзлайном (Adaptive 14-day)
-    fig, ax = plt.subplots(figsize=(10.5, 6), dpi=300)
+    fig, ax = plt.subplots(figsize=(11.5, 6.2), dpi=300)
     ml_models = df_results[df_results["model"].str.contains("LogReg|LightGBM")].copy()
     x = np.arange(len(ml_models))
     width = 0.38
@@ -519,28 +609,29 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
     ax.set_title(f"Відносна різниця метрик порівняно з найкращим бейзлайном ({best_base_name})", fontsize=12, fontweight="bold", pad=12)
     ax.set_ylabel("Різниця (%)", fontsize=11)
     ax.set_xticks(x)
-    ax.set_xticklabels(ml_models["model"], rotation=18, ha="right", fontsize=9.5)
+    ax.set_xticklabels(ml_models["model"], rotation=20, ha="right", fontsize=9)
     ax.axhline(0, color="gray", linestyle="--")
     ax.legend(frameon=True, fontsize=10)
 
     for r in rects1:
         h = r.get_height()
         ax.annotate(f"{h:+.1f}%", xy=(r.get_x() + r.get_width() / 2, h), xytext=(0, 3 if h >= 0 else -12),
-                    textcoords="offset points", ha="center", va="bottom", fontsize=8.5, fontweight="bold")
+                    textcoords="offset points", ha="center", va="bottom", fontsize=8, fontweight="bold")
     for r in rects2:
         h = r.get_height()
         ax.annotate(f"{h:+.1f}%", xy=(r.get_x() + r.get_width() / 2, h), xytext=(0, 3 if h >= 0 else -12),
-                    textcoords="offset points", ha="center", va="bottom", fontsize=8.5, fontweight="bold")
+                    textcoords="offset points", ha="center", va="bottom", fontsize=8, fontweight="bold")
 
     fig.tight_layout()
     fig.savefig("reports/figures/12_lift_over_baselines.png")
     plt.close(fig)
 
-    # Графік 4: Reliability Diagram (Калібрувальна крива для LightGBM Set B та Set C)
+    # Графік 4: Reliability Diagram (Калібрувальна крива для LightGBM Set B, Set C, Set C')
     fig, ax = plt.subplots(figsize=(7.5, 7), dpi=300)
     for m_label, color, marker in [
         ("LightGBM (Set B: With Spatial)", "#e6550d", "s"),
         ("LightGBM (Set C: Spatial + Adaptive)", "#d62728", "o"),
+        ("LightGBM (Set C': Adaptive + Lags)", "#8c2d04", "^"),
     ]:
         prob_true, prob_pred = calibration_curve(y_test, probas[m_label], n_bins=10)
         ax.plot(prob_pred, prob_true, marker=marker, linewidth=2, color=color, label=m_label)
@@ -550,7 +641,7 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
     ax.set_ylabel("Фактична частка подій", fontsize=11)
     ax.set_xlim([0.0, 0.70])
     ax.set_ylim([0.0, 0.70])
-    ax.legend(loc="upper left", frameon=True)
+    ax.legend(loc="upper left", frameon=True, fontsize=9)
     fig.tight_layout()
     fig.savefig("reports/figures/13_calibration_reliability_diagram.png")
     plt.close(fig)

@@ -36,10 +36,16 @@ import numpy as np
 import pandas as pd
 
 from src.features.feature_store import build_neighbor_dict
+from src.models.train_models import (
+    FEATURE_SET_A,
+    FEATURE_SET_B,
+    FEATURE_SET_C,
+    FEATURE_SET_C_PRIME,
+)
 
 
 def test_causal_truncation_invariance(n_random: int = 100):
-    """Перевіряє нуль дублікатів та всі ознаки A/B/C і таргет на >= 100 часових зрізах T (включно з граничними)."""
+    """Перевіряє нуль дублікатів та всі ознаки A/B/C/C' і таргет на >= 100 часових зрізах T (включно з граничними)."""
     parquet_path = PROJECT_ROOT / "data" / "processed" / "alerts_clean_oblast.parquet"
     feature_store_path = PROJECT_ROOT / "data" / "processed" / "ml_features_hourly.parquet"
 
@@ -54,6 +60,17 @@ def test_causal_truncation_invariance(n_random: int = 100):
     store_dups = int(store_df.duplicated(subset=["timestamp_utc", "oblast"]).sum())
     assert clean_dups == 0, f"Found {clean_dups} duplicates in alerts_clean_oblast.parquet!"
     assert store_dups == 0, f"Found {store_dups} duplicates in ml_features_hourly.parquet!"
+
+    # Перевірка узгодженості наборів ознак A (10), B (13), C (22), C' (19)
+    assert len(FEATURE_SET_A) == 10 and set(FEATURE_SET_A).issubset(store_df.columns)
+    assert len(FEATURE_SET_B) == 13 and set(FEATURE_SET_B).issubset(store_df.columns)
+    assert len(FEATURE_SET_C) == 22 and set(FEATURE_SET_C).issubset(store_df.columns)
+    assert len(FEATURE_SET_C_PRIME) == 19 and set(FEATURE_SET_C_PRIME).issubset(store_df.columns)
+    assert set(FEATURE_SET_C) - set(FEATURE_SET_C_PRIME) == {
+        "national_active_count",
+        "hours_since_last_alert",
+        "onsets_last_24h",
+    }
 
     raw_clean = raw_df[~raw_df["is_occupied_extreme"]].copy()
     min_global_time = raw_clean["started_at"].min().floor("h")

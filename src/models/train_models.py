@@ -1,13 +1,15 @@
-"""Модуль навчання моделей машинного навчання та тюнінгу порогів (Фаза 2.3 - Набори A, B, C).
+"""Модуль навчання моделей машинного навчання та тюнінгу порогів (Фаза 2.3 - Набори A, B, C, C').
 
 Реалізує:
 1. Logistic Regression (L2, class_weight='balanced', StandardScaler виключно на Train)
 2. LightGBM (Gradient Boosted Decision Trees, early stopping виключно на Validation)
-3. Трьохрівневий Ablation Study:
+3. Чотирьохрівневий Ablation Study:
    - Підмножина A (10 ознак): Часові цикли, burden (6h/24h) та Train-кластери (No Spatial)
    - Підмножина B (13 ознак): A + просторовий стан сусідів у момент T (With Spatial)
    - Підмножина C (22 ознаки): B + адаптивні частоти (7d/14d/30d), нац. активність, старти за 24h,
-     час від останньої тривоги та лаги сусідів за 1, 2, 3 год (Spatial + Adaptive)
+     час від останньої тривоги та лаги сусідів за 1, 2, 3 год (Spatial + Adaptive Full)
+   - Підмножина C' (19 ознак): B + адаптивні частоти (7d/14d/30d) + лаги сусідів за 1, 2, 3 год
+     (без national_active_count, hours_since_last_alert та onsets_last_24h)
 4. Пошук оптимального порогу p* = argmax F2(p) виключно на Validation
 5. Збереження навчених моделей та артефактів для Phase 2.4 (Test evaluation)
 """
@@ -43,6 +45,11 @@ FEATURE_SET_B = FEATURE_SET_A + [
 FEATURE_SET_C = FEATURE_SET_B + [
     "adaptive_rate_7d", "adaptive_rate_14d", "adaptive_rate_30d",
     "national_active_count", "onsets_last_24h", "hours_since_last_alert",
+    "neighbors_active_lag_1h", "neighbors_active_lag_2h", "neighbors_active_lag_3h",
+]
+
+FEATURE_SET_C_PRIME = FEATURE_SET_B + [
+    "adaptive_rate_7d", "adaptive_rate_14d", "adaptive_rate_30d",
     "neighbors_active_lag_1h", "neighbors_active_lag_2h", "neighbors_active_lag_3h",
 ]
 
@@ -139,7 +146,7 @@ def train_lightgbm_model(X_train, y_train, X_val, y_val, feature_names):
 
 
 def run_pipeline():
-    """Повний цикл навчання, валідації та оцінки для фази 2.3 (A, B, C)."""
+    """Повний цикл навчання, валідації та оцінки для фази 2.3 (A, B, C, C')."""
     os.makedirs("models", exist_ok=True)
     os.makedirs("reports/figures", exist_ok=True)
 
@@ -150,7 +157,7 @@ def run_pipeline():
 
     baselines_df = pd.read_csv("reports/baselines_benchmark.csv")
 
-    # 1. Logistic Regression: Set A, Set B, Set C
+    # 1. Logistic Regression: Set A, Set B, Set C, Set C'
     lr_a, scaler_a = train_logistic_regression(train_df, y_train, FEATURE_SET_A)
     p_val_lr_a = lr_a.predict_proba(scaler_a.transform(val_df[FEATURE_SET_A]))[:, 1]
     best_lr_a, curve_lr_a = evaluate_threshold_grid(y_val, p_val_lr_a)
@@ -169,7 +176,13 @@ def run_pipeline():
     joblib.dump(lr_c, "models/logreg_adaptive.joblib")
     joblib.dump(scaler_c, "models/scaler_adaptive.joblib")
 
-    # 2. LightGBM: Set A, Set B, Set C
+    lr_cp, scaler_cp = train_logistic_regression(train_df, y_train, FEATURE_SET_C_PRIME)
+    p_val_lr_cp = lr_cp.predict_proba(scaler_cp.transform(val_df[FEATURE_SET_C_PRIME]))[:, 1]
+    best_lr_cp, curve_lr_cp = evaluate_threshold_grid(y_val, p_val_lr_cp)
+    joblib.dump(lr_cp, "models/logreg_c_prime.joblib")
+    joblib.dump(scaler_cp, "models/scaler_c_prime.joblib")
+
+    # 2. LightGBM: Set A, Set B, Set C, Set C'
     lgb_a = train_lightgbm_model(train_df, y_train, val_df, y_val, FEATURE_SET_A)
     p_val_lgb_a = lgb_a.predict_proba(val_df[FEATURE_SET_A])[:, 1]
     best_lgb_a, curve_lgb_a = evaluate_threshold_grid(y_val, p_val_lgb_a)
@@ -185,6 +198,11 @@ def run_pipeline():
     best_lgb_c, curve_lgb_c = evaluate_threshold_grid(y_val, p_val_lgb_c)
     joblib.dump(lgb_c, "models/lightgbm_adaptive.joblib")
 
+    lgb_cp = train_lightgbm_model(train_df, y_train, val_df, y_val, FEATURE_SET_C_PRIME)
+    p_val_lgb_cp = lgb_cp.predict_proba(val_df[FEATURE_SET_C_PRIME])[:, 1]
+    best_lgb_cp, curve_lgb_cp = evaluate_threshold_grid(y_val, p_val_lgb_cp)
+    joblib.dump(lgb_cp, "models/lightgbm_c_prime.joblib")
+
     # Збереження всіх порогів у JSON
     optimal_thresholds = {
         "Baseline 1: True Naive Persistence": 0.500,
@@ -197,9 +215,11 @@ def run_pipeline():
         "LogReg (Set A: No Spatial)": float(best_lr_a["threshold"]),
         "LogReg (Set B: With Spatial)": float(best_lr_b["threshold"]),
         "LogReg (Set C: Spatial + Adaptive)": float(best_lr_c["threshold"]),
+        "LogReg (Set C': Adaptive + Lags)": float(best_lr_cp["threshold"]),
         "LightGBM (Set A: No Spatial)": float(best_lgb_a["threshold"]),
         "LightGBM (Set B: With Spatial)": float(best_lgb_b["threshold"]),
         "LightGBM (Set C: Spatial + Adaptive)": float(best_lgb_c["threshold"]),
+        "LightGBM (Set C': Adaptive + Lags)": float(best_lgb_cp["threshold"]),
     }
     with open("models/optimal_thresholds.json", "w", encoding="utf-8") as f:
         json.dump(optimal_thresholds, f, indent=2, ensure_ascii=False)
@@ -220,10 +240,12 @@ def run_pipeline():
     models_meta = [
         ("LogReg (Set A: No Spatial)", "A (Time, Burden & Cluster)", best_lr_a),
         ("LogReg (Set B: With Spatial)", "B (A + Spatial at T)", best_lr_b),
-        ("LogReg (Set C: Spatial + Adaptive)", "C (B + Adaptive & Lags)", best_lr_c),
+        ("LogReg (Set C: Spatial + Adaptive)", "C (B + Adaptive, Nat & Lags)", best_lr_c),
+        ("LogReg (Set C': Adaptive + Lags)", "C' (B + Adaptive & Lags only)", best_lr_cp),
         ("LightGBM (Set A: No Spatial)", "A (Time, Burden & Cluster)", best_lgb_a),
         ("LightGBM (Set B: With Spatial)", "B (A + Spatial at T)", best_lgb_b),
-        ("LightGBM (Set C: Spatial + Adaptive)", "C (B + Adaptive & Lags)", best_lgb_c),
+        ("LightGBM (Set C: Spatial + Adaptive)", "C (B + Adaptive, Nat & Lags)", best_lgb_c),
+        ("LightGBM (Set C': Adaptive + Lags)", "C' (B + Adaptive & Lags only)", best_lgb_cp),
     ]
 
     for name, fset, res in models_meta:
@@ -240,9 +262,9 @@ def run_pipeline():
 
     res_df = pd.DataFrame(benchmark_rows)
     res_df.to_csv("reports/ml_validation_benchmark.csv", index=False)
-    print("\n" + "=" * 90)
-    print("ПІДСУМКОВА ТАБЛИЦЯ ВАЛІДАЦІЇ (Validation Set: A vs B vs C):")
-    print("=" * 90)
+    print("\n" + "=" * 95)
+    print("ПІДСУМКОВА ТАБЛИЦЯ ВАЛІДАЦІЇ (Validation Set: A vs B vs C vs C'):")
+    print("=" * 95)
     print(res_df.to_string(index=False))
 
     plot_curves(
@@ -251,17 +273,21 @@ def run_pipeline():
             "LogReg (Set A: No Spatial)": p_val_lr_a,
             "LogReg (Set B: With Spatial)": p_val_lr_b,
             "LogReg (Set C: Spatial + Adaptive)": p_val_lr_c,
+            "LogReg (Set C': Adaptive + Lags)": p_val_lr_cp,
             "LightGBM (Set A: No Spatial)": p_val_lgb_a,
             "LightGBM (Set B: With Spatial)": p_val_lgb_b,
             "LightGBM (Set C: Spatial + Adaptive)": p_val_lgb_c,
+            "LightGBM (Set C': Adaptive + Lags)": p_val_lgb_cp,
         },
         curves_dict={
             "LogReg (Set A: No Spatial)": curve_lr_a,
             "LogReg (Set B: With Spatial)": curve_lr_b,
             "LogReg (Set C: Spatial + Adaptive)": curve_lr_c,
+            "LogReg (Set C': Adaptive + Lags)": curve_lr_cp,
             "LightGBM (Set A: No Spatial)": curve_lgb_a,
             "LightGBM (Set B: With Spatial)": curve_lgb_b,
             "LightGBM (Set C: Spatial + Adaptive)": curve_lgb_c,
+            "LightGBM (Set C': Adaptive + Lags)": curve_lgb_cp,
         },
         optimal_thresholds=optimal_thresholds,
     )
@@ -269,20 +295,22 @@ def run_pipeline():
 
 
 def plot_curves(y_val, probas_dict, curves_dict, optimal_thresholds):
-    """Будує Precision-Recall криві та графіки F2 від порогу на Validation (A, B, C)."""
+    """Будує Precision-Recall криві та графіки F2 від порогу на Validation (A, B, C, C')."""
     plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
 
     colors = {
-        "LogReg (Set A: No Spatial)": "#6baed6",
-        "LogReg (Set B: With Spatial)": "#2171b5",
-        "LogReg (Set C: Spatial + Adaptive)": "#08306b",
+        "LogReg (Set A: No Spatial)": "#9ecae1",
+        "LogReg (Set B: With Spatial)": "#4292c6",
+        "LogReg (Set C: Spatial + Adaptive)": "#08519c",
+        "LogReg (Set C': Adaptive + Lags)": "#6a51a3",
         "LightGBM (Set A: No Spatial)": "#fdae6b",
-        "LightGBM (Set B: With Spatial)": "#e6550d",
-        "LightGBM (Set C: Spatial + Adaptive)": "#a63603",
+        "LightGBM (Set B: With Spatial)": "#f16913",
+        "LightGBM (Set C: Spatial + Adaptive)": "#d62728",
+        "LightGBM (Set C': Adaptive + Lags)": "#8c2d04",
     }
 
     # 1. Precision-Recall Curves
-    fig, ax = plt.subplots(figsize=(10.5, 7), dpi=300)
+    fig, ax = plt.subplots(figsize=(11, 7.2), dpi=300)
     base_rate = np.mean(y_val)
     ax.axhline(base_rate, color="gray", linestyle="--", label=f"Випадковий вибір (Base rate = {base_rate:.3f})")
 
@@ -293,21 +321,21 @@ def plot_curves(y_val, probas_dict, curves_dict, optimal_thresholds):
             recall, precision,
             label=f"{name} (PR-AUC = {auc_score:.4f})",
             color=colors.get(name, "black"),
-            linewidth=2.4 if "Set C" in name else 1.8,
+            linewidth=2.3 if "Set C" in name else 1.7,
         )
 
-    ax.set_title("Precision-Recall криві на Validation (Ablation Study: Набори A, B, C)", fontsize=13, fontweight="bold", pad=12)
+    ax.set_title("Precision-Recall криві на Validation (Ablation Study: Набори A, B, C, C')", fontsize=13, fontweight="bold", pad=12)
     ax.set_xlabel("Recall (Повнота виявлення початку тривог)", fontsize=11)
     ax.set_ylabel("Precision (Точність сповіщень)", fontsize=11)
     ax.set_xlim([0.0, 1.0])
     ax.set_ylim([0.0, 0.70])
-    ax.legend(loc="upper right", frameon=True, fontsize=9.5)
+    ax.legend(loc="upper right", frameon=True, fontsize=8.8)
     fig.tight_layout()
     fig.savefig("reports/figures/08_ml_pr_curves_validation.png")
     plt.close(fig)
 
     # 2. F2 Score vs Classification Threshold
-    fig, ax = plt.subplots(figsize=(10.5, 6.5), dpi=300)
+    fig, ax = plt.subplots(figsize=(11, 6.8), dpi=300)
     for name, curve in curves_dict.items():
         opt_th = optimal_thresholds[name]
         best_f2 = curve.loc[(curve["threshold"] - opt_th).abs().idxmin(), "f2_score"]
@@ -315,15 +343,15 @@ def plot_curves(y_val, probas_dict, curves_dict, optimal_thresholds):
             curve["threshold"], curve["f2_score"],
             label=f"{name} (max F2 = {best_f2:.4f} @ p*={opt_th:.3f})",
             color=colors.get(name, "black"),
-            linewidth=2.2 if "Set C" in name else 1.7,
+            linewidth=2.1 if "Set C" in name else 1.6,
         )
-        ax.scatter([opt_th], [best_f2], color=colors.get(name, "black"), s=65, zorder=5)
+        ax.scatter([opt_th], [best_f2], color=colors.get(name, "black"), s=60, zorder=5)
 
-    ax.set_title("Підбір оптимального порогу $p^*$ на Validation для максимізації $F_2$-Score (A, B, C)", fontsize=13, fontweight="bold", pad=12)
+    ax.set_title("Підбір оптимального порогу $p^*$ на Validation для максимізації $F_2$-Score (A, B, C, C')", fontsize=13, fontweight="bold", pad=12)
     ax.set_xlabel("Поріг класифікації ($p$)", fontsize=11)
     ax.set_ylabel("$F_2$-Score (пріоритет Recall)", fontsize=11)
     ax.set_xlim([0.01, 0.70])
-    ax.legend(loc="lower center", frameon=True, fontsize=9)
+    ax.legend(loc="lower center", frameon=True, fontsize=8.5)
     fig.tight_layout()
     fig.savefig("reports/figures/09_threshold_tuning_f2.png")
     plt.close(fig)
