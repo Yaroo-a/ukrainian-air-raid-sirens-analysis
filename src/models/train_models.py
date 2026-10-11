@@ -132,6 +132,8 @@ def train_lightgbm_model(X_train, y_train, X_val, y_val, feature_names):
         colsample_bytree=0.8,
         random_state=42,
         n_jobs=4,
+        deterministic=True,
+        force_row_wise=True,
         verbosity=-1,
     )
 

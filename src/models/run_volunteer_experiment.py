@@ -415,6 +415,20 @@ def evaluate_single_variant_for_winner(
     p_val_lgb_c = lgb_c.predict_proba(val_df[FEATURE_SET_C])[:, 1]
     best_lgb_c, _ = evaluate_threshold_grid(y_val, p_val_lgb_c)
 
+    if variant_code == "naive_fixed_D":
+        os.makedirs("models", exist_ok=True)
+        joblib.dump(lgb_c, "models/volunteer_lightgbm_adaptive_fixed_d.joblib")
+        with open("models/volunteer_optimal_thresholds_fixed_d.json", "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "Baseline 3: Adaptive 14-day Rolling": float(best_adapt["threshold"]),
+                    "LightGBM (Set C: Spatial + Adaptive)": float(best_lgb_c["threshold"]),
+                },
+                f,
+                indent=2,
+                ensure_ascii=False,
+            )
+
     p_test_adapt = test_df["adaptive_rate_14d"].values
     p_test_lgb_c = lgb_c.predict_proba(test_df[FEATURE_SET_C])[:, 1]
 

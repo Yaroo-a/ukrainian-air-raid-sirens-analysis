@@ -1,0 +1,4 @@
+{
+  "Baseline 3: Adaptive 14-day Rolling": 0.09724137931034481,
+  "LightGBM (Set C: Spatial + Adaptive)": 0.11310344827586205
+}

@@ -208,7 +208,8 @@ def fit_fold_lightgbm(
         colsample_bytree=0.8,
         random_state=random_state,
         n_jobs=n_jobs,
-        deterministic=(n_jobs == 1),
+        deterministic=True,
+        force_row_wise=True,
         verbosity=-1,
     )
     model.fit(
