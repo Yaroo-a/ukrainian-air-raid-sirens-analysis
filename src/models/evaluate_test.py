@@ -549,7 +549,7 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
     ax1.set_xlabel("Recall (Повнота виявлення)", fontsize=11)
     ax1.set_ylabel("Precision (Точність сповіщень)", fontsize=11)
     ax1.set_xlim([0.0, 1.0])
-    ax1.set_ylim([0.0, 0.70])
+    ax1.set_ylim([0.0, 1.02])
     ax1.legend(loc="upper right", frameon=True, fontsize=8.0)
 
     base_rate_rec = np.mean(y_recent)
@@ -568,7 +568,7 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
     ax2.set_xlabel("Recall (Повнота виявлення)", fontsize=11)
     ax2.set_ylabel("Precision (Точність сповіщень)", fontsize=11)
     ax2.set_xlim([0.0, 1.0])
-    ax2.set_ylim([0.0, 0.70])
+    ax2.set_ylim([0.0, 1.02])
     ax2.legend(loc="upper right", frameon=True, fontsize=8.0)
 
     fig.suptitle("Precision-Recall криві (Ablation A vs B vs C vs C'): Повний Test та останні 60 днів", fontsize=14, fontweight="bold")
@@ -610,6 +610,7 @@ def plot_test_figures(y_test, probas, y_recent, probas_recent, df_imp, df_result
     ax.set_ylabel("Різниця (%)", fontsize=11)
     ax.set_xticks(x)
     ax.set_xticklabels(ml_models["model"], rotation=20, ha="right", fontsize=9)
+    ax.set_ylim([0, 33])
     ax.axhline(0, color="gray", linestyle="--")
     ax.legend(frameon=True, fontsize=10)
 

@@ -328,7 +328,7 @@ def plot_curves(y_val, probas_dict, curves_dict, optimal_thresholds):
     ax.set_xlabel("Recall (Повнота виявлення початку тривог)", fontsize=11)
     ax.set_ylabel("Precision (Точність сповіщень)", fontsize=11)
     ax.set_xlim([0.0, 1.0])
-    ax.set_ylim([0.0, 0.70])
+    ax.set_ylim([0.0, 1.02])
     ax.legend(loc="upper right", frameon=True, fontsize=8.8)
     fig.tight_layout()
     fig.savefig("reports/figures/08_ml_pr_curves_validation.png")
