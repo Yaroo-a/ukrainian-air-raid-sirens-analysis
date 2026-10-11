@@ -94,24 +94,29 @@ The repository strictly separates **descriptive full-period clustering** (used f
 
 ## 🤖 Machine Learning: Alert Onset Forecasting
 
-### Problem Formulation & Feature Engineering
+### Problem Formulation & Three Feature Sets (A, B, C)
 * **Decision Timestamp $T$:** Regular hourly grid in UTC (`timestamp_utc`).
-* **Calm-Period Conditioning:** `ml_features_hourly.parquet` retains strictly those observations where no alert is active in the region at moment $T$ (`is_active_T == 0`), totaling `797,428` calm region-hours across 24 regions.
+* **Calm-Period Conditioning:** `ml_features_hourly.parquet` retains strictly those observations where no alert is active in the region at moment $T$ (`is_active_T == 0`), totaling `797,428` calm region-hours across 24 regions (`0` duplicates on `(timestamp_utc, oblast)`).
 * **Target Variable (`target_onset_next_1h`):** $y_T = 1$ if a new alert starts in the region during the half-open interval **$[T, T + 1\text{h})$** (implemented as `k_onset = int(s_sec // 3600)`).
-* **Historical & Adaptive Lags:**
-  * `lagged_onset_1h` — indicator of whether an alert started in $[T - 1\text{h}, T)$ (computed on the full hourly grid before calm filtering).
-  * `burden_last_6h`, `burden_last_24h` — fraction of active hours in $[T - 6\text{h}, T)$ and $[T - 24\text{h}, T)$ (`closed="left"`).
-  * `adaptive_rate_14d` — empirical onset frequency in the region over the preceding 336 hours $[T - 336\text{h}, T)$ (`closed="left"`).
+* **Feature Set Hierarchy (all computed strictly from data prior to $T$, `closed="left"`, on the full hourly grid before calm filtering):**
+  * **Set A (Time, Burden & Train Cluster — 10 features):** `hour_sin`, `hour_cos`, `day_of_week`, `is_weekend`, `month` (`Europe/Kyiv`), `burden_last_6h`, `burden_last_24h` (fraction of active hours in $[T-6\text{h}, T)$ and $[T-24\text{h}, T)$), and Train-only cluster indicators (`cluster_1_low_activity`, `cluster_2_medium_activity`, `cluster_3_high_activity`).
+  * **Set B (A + Spatial at $T$ — 13 features):** Set A + instantaneous status of contiguous neighbors at exact moment $T$: `neighbors_active_count`, `neighbor_any_active`, `neighbor_active_ratio`.
+  * **Set C (B + Adaptive & Spatio-Temporal Memory — 22 features):** Set B + 9 historical adaptive and spatio-temporal lag features:
+    * `adaptive_rate_7d`, `adaptive_rate_14d`, `adaptive_rate_30d` — rolling onset frequencies in the region over the preceding 168, 336, and 720 hours (`closed="left"`).
+    * `national_active_count` — total number of oblasts across Ukraine with an active alert at moment $T$.
+    * `onsets_last_24h` (Variant A) — rolling sum of hourly onsets in the region over $[T - 24\text{h}, T)$ (`closed="left"`).
+    * `hours_since_last_alert` — hours elapsed from the latest known `finished_at <= T` in the region to moment $T$ (`clip(upper=720.0)`).
+    * `neighbors_active_lag_1h`, `neighbors_active_lag_2h`, `neighbors_active_lag_3h` — active neighbor counts at $T-1\text{h}$, $T-2\text{h}$, $T-3\text{h}$ on the full grid.
 
 ### Chronological Data Splits (UTC, with 2-hour Embargo Buffer)
 * **Train:** `2022-03-15` – `2024-04-30` (`410,150` calm hours, `33,240` onsets, base rate **$8.10\%$**).
-* **Validation:** `2024-05-01` – `2025-05-31` (`190,195` calm hours, `19,342` onsets, base rate **$10.17\%$**).
+* **Validation:** `2024-05-01` – `2025-05-31` (`190,195` calm hours, `19,342` onsets, base rate **$10.17\%$**). All hyperparameters, early stopping, and classification thresholds $p^* = \arg\max F_2$ are tuned strictly on Validation.
 * **Test:** `2025-06-01` – `2026-09-07` (`197,083` calm hours, `464` calendar days, `20,250` onsets, base rate **$10.27\%$**).
 * **Latest 60 Days (Test subset):** `2026-07-09` – `2026-09-07` (`23,646` calm hours, `2,992` onsets, base rate **$12.65\%$**).
 
 ---
 
-### Table 1. Full Test Set Benchmark (Test: June 2025 – September 2026)
+### Table 1. Full Test Set Benchmark (Test: June 2025 – September 2026, `reports/ml_models_benchmark.csv`)
 *95% confidence intervals are computed via **Day-Block Bootstrap** resampling calendar days (`n_bootstraps = 500`). `Prec @ R=78.2%` reports each model's Precision at the exact Recall level of the Adaptive Baseline (`Recall = 78.23%`).*
 
 | Model | Feature Set | Threshold $p^*$ (from Val) | Test PR-AUC [95% CI] | Test $F_2$ [95% CI] | Precision | Recall | Prec @ R=78.2% | Brier Score |
@@ -119,79 +124,94 @@ The repository strictly separates **descriptive full-period clustering** (used f
 | **Baseline 1: True Naive** | Lagged onset in $[T-1\text{h}, T)$ | 0.500 | — | 0.1034 [0.096, 0.111] | 29.1% | 8.9% | — | 0.1159 |
 | **Baseline 2: Historical Lookup** | Train lookup rate (Kyiv) | 0.085 | 0.2204 [0.212, 0.228] | 0.5033 [0.495, 0.511] | 22.7% | 72.3% | 21.1% | 0.0868 |
 | **Baseline 3: Adaptive 14-day** | 14-day rolling onset rate | 0.089 | 0.3031 [0.292, 0.315] | 0.5299 [0.520, 0.538] | 23.1% | 78.2% | 23.1% | 0.0818 |
-| **LogReg (No Spatial)** | A: Time + Burden + Cluster | 0.521 | 0.3881 [0.377, 0.399] | 0.5325 [0.524, 0.541] | 23.7% | 77.5% | 23.4% | 0.2007 |
-| **LogReg (With Spatial)** | B: Time + Burden + Neighbors | 0.572 | **0.3903** [0.380, 0.400] | 0.5505 [0.542, 0.559] | 24.3% | 80.4% | 25.1% | 0.2337 |
-| **LightGBM (No Spatial)** | A: Time + Burden + Cluster | 0.093 | 0.3482 [0.337, 0.359] | 0.5378 [0.529, 0.546] | **25.4%** | 74.6% | 23.5% | 0.0784 |
-| **LightGBM (With Spatial)** | B: Time + Burden + Neighbors | 0.105 | 0.3741 [0.363, 0.386] | **0.5597** [0.551, 0.568] | 23.2% | **86.4%** | **26.8%** | **0.0761** |
+| **LogReg (Set A: No Spatial)** | A (10 features: Time + Burden + Cluster) | 0.518 | 0.3881 [0.377, 0.399] | 0.5329 [0.524, 0.541] | 23.5% | 77.9% | 23.4% | 0.2007 |
+| **LogReg (Set B: With Spatial)** | B (13 features: A + Neighbors at $T$) | 0.561 | **0.3903** [0.380, 0.400] | 0.5499 [0.541, 0.558] | 24.0% | 81.2% | 25.1% | 0.2337 |
+| **LogReg (Set C: Spatial + Adaptive)** | C (22 features: B + Adaptive & Lags) | 0.565 | 0.3173 [0.306, 0.328] | 0.5431 [0.535, 0.550] | 21.1% | **89.3%** | 25.3% | 0.2875 |
+| **LightGBM (Set A: No Spatial)** | A (10 features: Time + Burden + Cluster) | 0.093 | 0.3482 [0.337, 0.359] | 0.5379 [0.529, 0.546] | **25.4%** | 74.6% | 23.5% | 0.0784 |
+| **LightGBM (Set B: With Spatial)** | B (13 features: A + Neighbors at $T$) | 0.109 | 0.3741 [0.363, 0.386] | **0.5610** [0.552, 0.570] | 23.5% | 85.8% | **26.8%** | **0.0761** |
+| **LightGBM (Set C: Spatial + Adaptive)** | C (22 features: B + Adaptive & Lags) | 0.129 | 0.3329 [0.323, 0.343] | 0.5551 [0.547, 0.562] | 23.0% | 85.8% | 26.3% | 0.0783 |
 
 ---
 
 ### Table 2. Latest 60 Days Benchmark (09.07.2026 – 07.09.2026, `reports/ml_recent_60d_benchmark.csv`)
 *Subset: 23,646 calm hours, 2,992 alert onsets (base rate 12.65%). Thresholds $p^*$ are frozen from Validation.*
 
-| Model | Threshold $p^*$ | PR-AUC [95% CI] | $F_2$-Score [95% CI] | Precision | Recall | Prec @ R=90.4% | Brier Score |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Baseline 1: True Naive** | 0.500 | — | 0.1621 [0.145, 0.181] | 39.2% | 14.1% | — | 0.1364 |
-| **Baseline 2: Historical Lookup** | 0.085 | 0.3258 [0.295, 0.357] | 0.5886 [0.564, 0.613] | 33.1% | 73.0% | 21.9% | 0.1038 |
-| **Baseline 3: Adaptive 14-day** | 0.089 | 0.3682 [0.333, 0.406] | 0.6430 [0.620, 0.664] | 29.9% | 90.4% | 29.9% | 0.0911 |
-| **LogReg (No Spatial)** | 0.521 | **0.5058** [0.480, 0.531] | 0.6533 [0.635, 0.674] | 35.6% | 82.6% | 29.4% | 0.1693 |
-| **LogReg (With Spatial)** | 0.572 | 0.4788 [0.444, 0.510] | 0.6494 [0.625, 0.674] | 33.0% | 85.7% | **30.2%** | 0.2064 |
-| **LightGBM (No Spatial)** | 0.093 | 0.4501 [0.423, 0.477] | **0.6558** [0.639, 0.674] | **37.0%** | 81.3% | 29.4% | 0.0885 |
-| **LightGBM (With Spatial)** | 0.105 | 0.4541 [0.424, 0.481] | 0.6429 [0.615, 0.669] | 29.7% | **90.7%** | **30.2%** | **0.0853** |
+| Model | Feature Set | Threshold $p^*$ | PR-AUC [95% CI] | $F_2$-Score [95% CI] | Precision | Recall | Prec @ R=90.4% | Brier Score |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Baseline 1: True Naive** | Lag $[T-1\text{h}, T)$ | 0.500 | — | 0.1621 [0.145, 0.181] | 39.2% | 14.1% | — | 0.1364 |
+| **Baseline 2: Historical Lookup** | Train lookup (Kyiv) | 0.085 | 0.3257 [0.295, 0.357] | 0.5886 [0.564, 0.613] | 33.1% | 73.0% | 21.9% | 0.1038 |
+| **Baseline 3: Adaptive 14-day** | 14-day rolling rate | 0.089 | 0.3682 [0.333, 0.406] | 0.6430 [0.620, 0.664] | 29.9% | 90.4% | 29.9% | 0.0911 |
+| **LogReg (Set A: No Spatial)** | A (10 features) | 0.518 | **0.5058** [0.480, 0.531] | 0.6535 [0.636, 0.674] | 35.5% | 82.8% | 29.4% | 0.1693 |
+| **LogReg (Set B: With Spatial)** | B (13 features) | 0.561 | 0.4788 [0.444, 0.510] | 0.6501 [0.626, 0.674] | 32.7% | 86.3% | 30.2% | 0.2064 |
+| **LogReg (Set C: Spatial + Adaptive)** | C (22 features) | 0.565 | 0.3889 [0.354, 0.423] | 0.6196 [0.592, 0.643] | 25.8% | **95.5%** | **30.8%** | 0.2974 |
+| **LightGBM (Set A: No Spatial)** | A (10 features) | 0.093 | 0.4501 [0.423, 0.477] | **0.6559** [0.639, 0.674] | **37.0%** | 81.3% | 29.4% | 0.0885 |
+| **LightGBM (Set B: With Spatial)** | B (13 features) | 0.109 | 0.4541 [0.424, 0.481] | 0.6442 [0.617, 0.670] | 29.9% | 90.5% | 30.2% | **0.0853** |
+| **LightGBM (Set C: Spatial + Adaptive)** | C (22 features) | 0.129 | 0.3809 [0.348, 0.416] | 0.6301 [0.603, 0.654] | 27.3% | 93.5% | 29.8% | 0.0895 |
 
 <p align="center">
   <img src="reports/figures/10_test_pr_curves_comparison.png" alt="Test and Recent 60d PR Curves Comparison" width="95%">
-  <br><em>Figure 5. Precision-Recall curves on the full Test set (left) and the latest 60 days (right).</em>
+  <br><em>Figure 5. Precision-Recall curves across Feature Sets A, B, C and baselines on the full Test set (left) and the latest 60 days (right).</em>
 </p>
 
 ---
 
-## 💡 Result Interpretation & Fair Model Comparison
+## 💡 Result Interpretation & Evaluation of Feature Set C
 
-1. **Resolution of the Logging Format Artifact:**  
-   When post-August 2025 oblast alerts are reconstructed from district/community intervals, the Test positive rate is **10.27%** (compared to 8.10% on Train and 10.17% on Val). Consequently, the static `Historical Lookup` baseline remains competitive ($F_2 = 0.5033$), and the `Adaptive 14-day Rolling` baseline achieves **$F_2 = 0.5299$, PR-AUC = 0.3031**.
-2. **Comparison Against the Best Baseline:**  
-   * On the full Test set, **LightGBM (With Spatial)** outperforms `Adaptive 14-day Rolling` on both primary metrics: paired Day-Block Bootstrap ($N=500$) shows **$\Delta \text{PR-AUC} = +0.0711$** (95% CI $[+0.0613, +0.0812]$, **$+23.4\%$** relative gain) and **$\Delta F_2 = +0.0296$** (95% CI $[+0.0247, +0.0353]$, **$+5.6\%$** relative gain).
-   * Because comparing raw Recall across different thresholds and Precision levels is invalid, we evaluate all models at a fixed operating point matching the Adaptive Baseline's Recall (`Recall = 78.23%`): **LightGBM (With Spatial)** achieves **Precision = 26.81%** vs. **23.14%** for the Adaptive Baseline (`LogReg With Spatial` achieves **25.14%**).
-   * On the **latest 60 days**, the `Adaptive 14-day Rolling` baseline achieves $F_2 = 0.6430$, matching `LightGBM (With Spatial)` ($F_2 = 0.6429$), while ML models retain a substantial advantage in ranking (PR-AUC $0.4541$–$0.5058$ vs. $0.3682$).
+1. **Pre-Specified Primary Comparison (`LightGBM Set C` vs. `Adaptive 14-day Rolling`):**
+   * **On the Full Test Set (`2025-06` – `2026-09`):** `LightGBM (Set C)` statistically significantly outperforms `Adaptive 14-day Baseline`:
+     * **$\Delta \text{PR-AUC} = +0.0297$**, 95% CI **$[+0.0220, +0.0373]$** (`0.3329` vs. `0.3031`, **$+9.8\%$** relative lift).
+     * **$\Delta F_2 = +0.0249$**, 95% CI **$[+0.0189, +0.0304]$** (`0.5551` vs. `0.5299`, **$+4.7\%$** relative lift).
+     * **Precision at equal `Recall = 78.23%`:** **26.25%** for `LightGBM (Set C)` vs. **23.14%** for the Adaptive Baseline ($+3.11$ percentage points).
+   * **On the Latest 60 Days (`2026-07-09` – `2026-09-07`):** `LightGBM (Set C)` **does not outperform** the `Adaptive 14-day Baseline`:
+     * In **PR-AUC**, the paired difference is **$\Delta = +0.0126$**, 95% CI **$[-0.0055, +0.0314]$** (crosses zero — not statistically significant), and Precision at equal `Recall = 90.37%` is virtually identical (**29.81%** vs. **29.85%**).
+     * In **$F_2$-Score** at the frozen Validation threshold $p^* = 0.129$, `Set C` trails the Adaptive Baseline: **$\Delta F_2 = -0.0133$**, 95% CI **$[-0.0223, -0.0048]$** (`0.6301` vs. `0.6430`), because elevated baseline alert activity in July–September 2026 (12.65%) inflates the rolling rate features (`adaptive_rate_7d/14d/30d`), causing `Set C` to over-predict (`Recall = 93.5%`, `Precision = 27.3%`).
+
+2. **Why Compact Set B (`With Spatial`) Outperforms Expanded Set C (`Spatial + Adaptive`) on Test:**
+   * On the **Validation** split (`2024-05` – `2025-05`), expanding features `A -> B -> C` monotonically improved LightGBM on both PR-AUC (`0.2680 -> 0.2961 -> 0.3012`) and $F_2$ (`0.4877 -> 0.5241 -> 0.5331`).
+   * However, on **Test** (`2025-06` – `2026-09`), **`LightGBM (Set B: With Spatial)`** achieved the strongest overall generalization (`PR-AUC = 0.3741`, `F2 = 0.5610`, `Prec @ R=78.2% = 26.81%`, `Brier = 0.0761`). Adding the 9 features of Set C reduced Test PR-AUC relative to Set B by **$\Delta_{\text{C}-\text{B}} = -0.0414$** (95% CI $[-0.0499, -0.0332]$) for LightGBM and **$-0.0733$** ($[-0.0825, -0.0638]$) for LogReg.
+   * **Mechanism (Feature Dominance & Regime Shift):** Inspection of `LightGBM (Set C)` feature importance (`reports/feature_importance_lightgbm.csv`) reveals that 4 new features — `adaptive_rate_14d` (Gain `158,123`), `adaptive_rate_30d` (`70,635`), `adaptive_rate_7d` (`41,423`), and `national_active_count` (`38,894`) — absorbed over **60% of total tree Gain** during training on 2022–2024 data, crowding out local spatial and diurnal splits. Under the post-August 2025 district-merged regime, heavy reliance on collinear multi-week rolling averages degraded ranking precision compared to the leaner `Set B` representation.
+
 3. **Predicted Probability Quantiles & Calibration:**  
-   * On Test, empirical quantiles of `LightGBM (With Spatial)` predicted probabilities are: $Q_{10} = 1.54\%$, $Q_{25} = 2.44\%$, Median ($Q_{50}$) $= 4.96\%$, $Q_{75} = 18.12\%$, $Q_{90} = 29.65\%$, $Q_{95} = 36.88\%$, $Q_{99} = 42.79\%$.
-   * Unlike Logistic Regression trained with `class_weight='balanced'` (which achieves high PR-AUC $0.3903$ but produces shifted, uncalibrated probabilities with Brier Score $0.2007–0.2337$), **LightGBM** achieves well-calibrated probability estimates (**Brier Score = 0.0761** on Test and **0.0853** on the last 60 days).
+   * On Test, empirical quantiles of `LightGBM (Set C)` predicted probabilities are: $Q_{10} = 1.63\%$, $Q_{25} = 3.01\%$, Median ($Q_{50}$) $= 7.88\%$, $Q_{75} = 19.81\%$, $Q_{90} = 30.39\%$, $Q_{95} = 36.37\%$, $Q_{99} = 46.96\%$.
+   * **LightGBM (Set B and Set C)** maintains strong probability calibration (**Brier Score = 0.0761** and **0.0783**), whereas Logistic Regression with `class_weight='balanced'` yields uncalibrated probabilities (`Brier = 0.2007–0.2875`).
 
 <p align="center">
   <img src="reports/figures/13_calibration_reliability_diagram.png" alt="Calibration Reliability Diagram" width="75%">
-  <br><em>Figure 6. Reliability diagram for LightGBM (With Spatial) on the Test set.</em>
+  <br><em>Figure 6. Reliability diagram for LightGBM (Set B and Set C) on the Test set.</em>
 </p>
 
 ---
 
-## 🛰️ Ablation Study: Contribution of Spatial Features
+## 🛰️ Three-Tier Ablation Study (Feature Sets A vs. B vs. C)
 
-Evaluating the addition of the 3 contiguous neighbor features (`neighbors_active_count`, `neighbor_any_active`, `neighbor_active_ratio`) via paired Day-Block Bootstrap ($N=500$ calendar days):
-* **LightGBM:** PR-AUC increases from **0.3482** to **0.3741**. The paired difference is **$\Delta \text{PR-AUC} = +0.0259$**, 95% CI **$[+0.0226, +0.0293]$** (strictly positive confidence interval — statistically significant improvement). $F_2$ increases from $0.5378$ to $0.5597$, and Precision at `Recall = 78.2%` increases from $23.5\%$ to $26.8\%$.
-* **Logistic Regression:** PR-AUC changes from **0.3881** to **0.3903**. The paired difference is **$\Delta \text{PR-AUC} = +0.0024$**, 95% CI **$[-0.0017, +0.0065]$** (confidence interval includes zero — PR-AUC difference is not statistically significant, although Precision at `Recall = 78.2%` increases from $23.4\%$ to $25.1\%$).
+Paired metric differences on the full Test set (500-iteration Day-Block Bootstrap across calendar days, `reports/test_evaluation_details.json`):
+
+| Comparison (Paired Difference on Test) | $\Delta$ PR-AUC [95% CI] | $\Delta F_2$-Score [95% CI] | Conclusion |
+| :--- | :---: | :---: | :--- |
+| **Primary:** `LightGBM (Set C) - Adaptive 14d` | **$+0.0297$** $[+0.0220, +0.0373]$ | **$+0.0249$** $[+0.0189, +0.0304]$ | Statistically significant gain over Adaptive Baseline |
+| `LogReg (Set C) - Adaptive 14d` | **$+0.0140$** $[+0.0089, +0.0199]$ | **$+0.0131$** $[+0.0079, +0.0178]$ | Modest statistically significant gain over Baseline |
+| **LightGBM:** `Set B - Set A` (adding neighbors at $T$) | **$+0.0259$** $[+0.0226, +0.0293]$ | **$+0.0230$** $[+0.0171, +0.0288]$ | Strong positive contribution from spatial features |
+| **LightGBM:** `Set C - Set B` (adding adaptive & lags) | **$-0.0414$** $[-0.0499, -0.0332]$ | **$-0.0060$** $[-0.0095, -0.0025]$ | Rolling-rate dominance degrades Test ranking; `Set B` wins |
+| **LightGBM:** `Set C - Set A` (net B+C effect) | **$-0.0154$** $[-0.0253, -0.0060]$ | **$+0.0170$** $[+0.0097, +0.0239]$ | Higher $F_2$ via Recall, but lower PR-AUC than `Set A` |
+| **LogReg:** `Set B - Set A` (adding neighbors at $T$) | $+0.0024$ $[-0.0017, +0.0065]$ | **$+0.0168$** $[+0.0131, +0.0207]$ | PR-AUC insignificant; $F_2$ and `Prec@R=78.2%` improve |
+| **LogReg:** `Set C - Set B` (adding adaptive & lags) | **$-0.0733$** $[-0.0825, -0.0638]$ | **$-0.0068$** $[-0.0112, -0.0023]$ | Collinear rolling rates degrade linear ranking |
 
 <p align="center">
-  <img src="reports/figures/11_feature_importance_lightgbm.png" alt="LightGBM Feature Importance" width="85%">
-  <br><em>Figure 7. Feature importance in LightGBM (With Spatial) ranked by Total Gain.</em>
+  <img src="reports/figures/11_feature_importance_lightgbm.png" alt="LightGBM Set C Feature Importance" width="85%">
+  <br><em>Figure 7. Feature importance of the 22 features in LightGBM (Set C) ranked by Total Gain.</em>
 </p>
-
-#### Top-3 Features by Gain in LightGBM (`reports/feature_importance_lightgbm.csv`):
-1. `burden_last_24h` (Gain `95,669`) — fraction of active hours over the past 24 hours.
-2. `cluster_3_high_activity` (Gain `72,662`) — Train-fitted high-activity regional cluster indicator.
-3. `neighbors_active_count` (Gain `32,142`) — number of contiguous oblasts with an active alert at moment $T$.
 
 ---
 
 ## 🛡️ Causal Invariance Verification & Methodological Limitations
 
 ### What `tests/test_leakage_invariance.py` Verifies
-The test samples $N = 25$ random timestamps $T$ (534 region-hour rows across Train, Validation, and Test) and performs two checks:
-1. **Future Truncation Invariance at $T$:** All alerts with `started_at > T` are removed, and for alerts ongoing at $T$ (`finished_at > T`), `finished_at` is masked (treated as open at $T$). From this truncated history, the test independently recomputes the calm filter `is_active_T == 0`, `lagged_onset_1h`, rolling burdens `burden_last_6h` and `burden_last_24h`, 14-day frequency `adaptive_rate_14d`, spatial neighbor indicators (`neighbors_active_count`, `neighbor_any_active`, `neighbor_active_ratio`), and calendar transforms, verifying numerical agreement (`atol=1e-6`) with `ml_features_hourly.parquet`.
+The test first verifies **zero duplicates (`assert 0`)** in both `alerts_clean_oblast.parquet` and `ml_features_hourly.parquet`, and then evaluates **$119$ timestamps $T$** ($19$ explicit boundary cases — grid start $k=0,1,2,3,6$, rolling window boundaries $k=23,24,25,167,168,335,336,719,720$, and Train/Val/Test split boundaries — plus $100$ random timestamps $T$, totaling **`2,399` region-hour rows**):
+1. **Future Truncation Invariance at $T$:** All alerts with `started_at > T` are removed, and for alerts ongoing at $T$ (`finished_at > T`), `finished_at` is masked (`NaT`, treated as open at $T$). From this truncated history, the test independently recomputes the calm filter `is_active_T == 0` and all 22 features across Sets A, B, and C (`lagged_onset_1h`, `burden_last_6h`, `burden_last_24h`, `adaptive_rate_7d/14d/30d`, `national_active_count`, `onsets_last_24h`, `hours_since_last_alert`, `neighbors_active_count`, `neighbor_any_active`, `neighbor_active_ratio`, `neighbors_active_lag_1h/2h/3h`, and calendar transforms), verifying numerical agreement with `ml_features_hourly.parquet`.
 2. **Target Window $[T, T + 1\text{h})$ Dependence:** Verifies that `target_onset_next_1h` matches the binary indicator computed solely from alerts with `started_at` in $[T, T + 1\text{h})$.
 
 ### ⚠️ Methodological Limitations & Caveats
-1. **Micro-Alert Filtering ($< 60$ s):** During preprocessing in `src/data/cleaner.py`, technical glitches shorter than 60 seconds are filtered using `finished_at - started_at`. For an alert starting less than 60 seconds before $T$, filtering relies on its completion time.
+1. **Scope of `test_leakage_invariance.py` vs. `cleaner.py`:** `tests/test_leakage_invariance.py` operates on the cleaned intervals in `alerts_clean_oblast.parquet`. While it verifies the causal invariance of `feature_store.py`, **it does not inspect upstream preprocessing inside `src/data/cleaner.py`** — specifically micro-alert glitch filtering ($< 60$ s using `finished_at - started_at`, where filtering an alert that started less than 60 seconds before $T$ relies on its completion time) and overlapping interval merging.
 2. **Sub-Regional Aggregation After 2025-08-01:** Reconstructing oblast alerts as the union of intervals across `oblast`, `raion`, and `hromada` preserves time-series continuity after the logging transition, but treats localized district alerts as oblast-level activity.
 3. **Train Boundary Duration Censoring:** In `generate_train_only_clusters()`, durations of alerts crossing `2024-04-30 23:59:59 UTC` are censored at `train_end`, whereas descriptive RQ2 profiles (`regional_clusters_summary.csv`) span the full 2022–2026 period.
 4. **Shared Validation Set for Early Stopping and Threshold Tuning:** The Validation split is used both for LightGBM early stopping (`stopping_rounds=30`) and for selecting the classification threshold $p^* = \arg\max F_2$.

@@ -1,21 +1,30 @@
-"""Feature Store Generator for Machine Learning Forecasting (Phase 2.1 - Refactored).
+"""Feature Store Generator for Machine Learning Forecasting (Phase 2.1 - Refactored with Set C).
 
 Transforms historical alert events into a regular hourly panel dataset (X, y)
-for 24 Ukrainian regions with causal feature definitions:
+for 24 Ukrainian regions with strict causal feature definitions:
 1. Precise decision timestamp T (hourly grid in UTC).
 2. Conditioning on calm periods: filtered strictly to rows where alert is NOT active at T (is_active_T == 0).
 3. Target variable y_T: Onset of a new alert in the half-open interval [T, T + 1h) (via k_onset = s_sec // 3600).
 4. True temporal lag: lagged_onset_1h indicates whether an alert started in [T - 1h, T) on the full hourly grid BEFORE filtering calm rows.
-5. Adaptive baseline feature: adaptive_rate_14d computed on rolling past 14 days (336 hours) strictly before T (closed="left").
+5. Adaptive rolling rates (strictly before T, closed="left"):
+   - adaptive_rate_7d (168h)
+   - adaptive_rate_14d (336h)
+   - adaptive_rate_30d (720h)
 6. Cyclical temporal transforms: hour_sin, hour_cos, day_of_week, is_weekend, month at moment T (Europe/Kyiv).
-7. Autoregressive burden: burden_last_6h, burden_last_24h over [T - 6h, T) and [T - 24h, T) (closed="left").
-8. Spatial neighbor features at exact moment T: neighbors_active_count, neighbor_any_active, neighbor_active_ratio.
+7. Autoregressive burden & recent history strictly before T:
+   - burden_last_6h, burden_last_24h over [T - 6h, T) and [T - 24h, T) (closed="left")
+   - onsets_last_24h: rolling sum of hourly onsets in [T - 24h, T) (Variant A, closed="left")
+   - hours_since_last_alert: hours elapsed from the latest finished_at <= T to T (clipped at 720h)
+8. Spatial neighbor & national features at exact moment T and lags T-1h, T-2h, T-3h:
+   - neighbors_active_count, neighbor_any_active, neighbor_active_ratio
+   - neighbors_active_lag_1h, neighbors_active_lag_2h, neighbors_active_lag_3h (on full hourly grid)
+   - national_active_count: total active oblasts across Ukraine at exact moment T
 9. Regional clusters: read strictly from reports/clusters_train_only.csv (Train-only fit):
    - cluster_1_low_activity
    - cluster_2_medium_activity
    - cluster_3_high_activity
 10. Purging & Embargo: 2-hour buffer at Train/Val and Val/Test boundaries.
-11. Output: data/processed/ml_features_hourly.parquet.
+11. Output: data/processed/ml_features_hourly.parquet (verified 0 duplicates).
 """
 
 import sys
@@ -50,8 +59,8 @@ def generate_feature_store(
     clusters_csv_path: str | Path = "reports/clusters_train_only.csv",
     output_parquet_path: str | Path = "data/processed/ml_features_hourly.parquet",
 ) -> pd.DataFrame:
-    """Constructs the calm-period hourly ML feature matrix with strict causal lags."""
-    print("🚀 [Фаза 2.1] Генерація Feature Store (строго періоди тиші, Train-only кластери)...")
+    """Constructs the calm-period hourly ML feature matrix with strict causal lags (Sets A, B, C)."""
+    print("🚀 [Фаза 2.1] Генерація Feature Store (строго періоди тиші, Train-only кластери, набори A/B/C)...")
     input_file = Path(parquet_path)
     clusters_file = Path(clusters_csv_path)
     output_file = Path(output_parquet_path)
@@ -60,6 +69,8 @@ def generate_feature_store(
     # 1. Load alerts (excluding extreme occupied territories only)
     print(f"📖 Завантаження даних з {input_file}...")
     df = pd.read_parquet(input_file)
+    dup_input = int(df.duplicated(subset=["oblast", "started_at", "finished_at"]).sum())
+    assert dup_input == 0, f"Знайдено {dup_input} дублікатів у вхідному файлі {input_file}!"
     clean_df = df[~df["is_occupied_extreme"]].copy()
 
     # Load cluster labels strictly fitted on Train
@@ -76,6 +87,7 @@ def generate_feature_store(
     max_time = clean_df["started_at"].max().ceil("h")
     hourly_index = pd.date_range(start=min_time, end=max_time - pd.Timedelta(hours=1), freq="1h", tz="UTC")
     n_hours = len(hourly_index)
+    grid_sec = np.arange(n_hours, dtype=np.float64) * 3600.0
     print(f"⏱️ Побудова повної годинної сітки: {n_hours:,} точок ({min_time.date()} — {max_time.date()})...")
 
     # 3. Create high-speed lookup matrices for each oblast
@@ -85,6 +97,16 @@ def generate_feature_store(
 
     far_future = pd.Timestamp("2099-01-01", tz="UTC")
     clean_df["finished_at_safe"] = clean_df["finished_at"].fillna(far_future)
+
+    # Store sorted finished_at seconds per oblast for hours_since_last_alert
+    finished_sec_by_oblast: dict[str, np.ndarray] = {}
+    for o_name in oblasts:
+        sub_fin = clean_df.loc[
+            (clean_df["oblast"] == o_name) & (clean_df["finished_at"].notna()),
+            "finished_at",
+        ]
+        fin_secs = np.sort((sub_fin - min_time).dt.total_seconds().values)
+        finished_sec_by_oblast[o_name] = fin_secs
 
     print("⚡ Векторизоване заповнення матриць активності та стартів...")
     for _, row in clean_df.iterrows():
@@ -105,6 +127,9 @@ def generate_feature_store(
         k_onset = int(s_sec // 3600)
         if 0 <= k_onset < n_hours:
             onset_next_1h[k_onset, o_idx] = 1
+
+    # Total active oblasts across Ukraine at exact moment T
+    national_active_all = active_at_T.sum(axis=1).astype(np.int8)
 
     # 4. Generate records for each region
     print("🛠️ Формування панельних ознак на повній сітці з казуальними лагами...")
@@ -152,23 +177,45 @@ def generate_feature_store(
         burden_6h = s_series.rolling(window=6, min_periods=1, closed="left").mean().fillna(0).values
         burden_24h = s_series.rolling(window=24, min_periods=1, closed="left").mean().fillna(0).values
 
-        # Adaptive baseline feature: rolling 14-day onset rate strictly before T (14*24 = 336 hours)
+        # Adaptive rolling onset rates & 24h onset count strictly before T (closed="left")
         target_series = pd.Series(target)
+        adaptive_7d = target_series.rolling(window=168, min_periods=24, closed="left").mean().fillna(0.05).values
         adaptive_14d = target_series.rolling(window=336, min_periods=24, closed="left").mean().fillna(0.05).values
+        adaptive_30d = target_series.rolling(window=720, min_periods=24, closed="left").mean().fillna(0.05).values
+        onsets_24h = target_series.rolling(window=24, min_periods=1, closed="left").sum().fillna(0).values
 
-        # Spatial neighbors status at moment T
+        # Hours since last alert finished (strictly finished_at <= T, clipped to 720h)
+        fin_secs = finished_sec_by_oblast[o_name]
+        if len(fin_secs) > 0:
+            pos = np.searchsorted(fin_secs, grid_sec, side="right") - 1
+            valid_mask = pos >= 0
+            hours_since_last = np.full(n_hours, 720.0, dtype=np.float32)
+            valid_pos = pos[valid_mask]
+            elapsed_h = (grid_sec[valid_mask] - fin_secs[valid_pos]) / 3600.0
+            hours_since_last[valid_mask] = np.clip(elapsed_h, 0.0, 720.0).astype(np.float32)
+        else:
+            hours_since_last = np.full(n_hours, 720.0, dtype=np.float32)
+
+        # Spatial neighbors status at moment T and lags T-1h, T-2h, T-3h on full grid
         nbr_names = neighbor_map[o_name]
         nbr_indices = [o_idx_map[n] for n in nbr_names if n in o_idx_map]
 
         if len(nbr_indices) > 0:
             nbr_active_matrix = active_at_T[:, nbr_indices]
-            nbr_active_count = nbr_active_matrix.sum(axis=1)
+            nbr_active_count = nbr_active_matrix.sum(axis=1).astype(np.int8)
             nbr_any_active = (nbr_active_count > 0).astype(np.int8)
-            nbr_active_ratio = nbr_active_count / len(nbr_indices)
+            nbr_active_ratio = (nbr_active_count / len(nbr_indices)).astype(np.float32)
         else:
             nbr_active_count = np.zeros(n_hours, dtype=np.int8)
             nbr_any_active = np.zeros(n_hours, dtype=np.int8)
             nbr_active_ratio = np.zeros(n_hours, dtype=np.float32)
+
+        nbr_lag_1h = np.zeros(n_hours, dtype=np.int8)
+        nbr_lag_2h = np.zeros(n_hours, dtype=np.int8)
+        nbr_lag_3h = np.zeros(n_hours, dtype=np.int8)
+        nbr_lag_1h[1:] = nbr_active_count[:-1]
+        nbr_lag_2h[2:] = nbr_active_count[:-2]
+        nbr_lag_3h[3:] = nbr_active_count[:-3]
 
         c_id = cluster_map.get(o_name, 1)
 
@@ -179,7 +226,12 @@ def generate_feature_store(
             "split_set": split_labels,
             "is_active_T": own_active,
             "lagged_onset_1h": lagged_onset_1h,
+            "adaptive_rate_7d": adaptive_7d.astype(np.float32),
             "adaptive_rate_14d": adaptive_14d.astype(np.float32),
+            "adaptive_rate_30d": adaptive_30d.astype(np.float32),
+            "national_active_count": national_active_all,
+            "onsets_last_24h": onsets_24h.astype(np.int16),
+            "hours_since_last_alert": hours_since_last,
             # Features
             "hour_sin": hour_sin.astype(np.float32),
             "hour_cos": hour_cos.astype(np.float32),
@@ -188,9 +240,12 @@ def generate_feature_store(
             "month": months.astype(np.int8),
             "burden_last_6h": burden_6h.astype(np.float32),
             "burden_last_24h": burden_24h.astype(np.float32),
-            "neighbors_active_count": nbr_active_count.astype(np.int8),
+            "neighbors_active_count": nbr_active_count,
             "neighbor_any_active": nbr_any_active,
-            "neighbor_active_ratio": nbr_active_ratio.astype(np.float32),
+            "neighbor_active_ratio": nbr_active_ratio,
+            "neighbors_active_lag_1h": nbr_lag_1h,
+            "neighbors_active_lag_2h": nbr_lag_2h,
+            "neighbors_active_lag_3h": nbr_lag_3h,
             # Target
             "target_onset_next_1h": target,
         })
@@ -211,6 +266,11 @@ def generate_feature_store(
     panel_df["cluster_1_low_activity"] = (panel_df["cluster_id"] == 1).astype(np.int8)
     panel_df["cluster_2_medium_activity"] = (panel_df["cluster_id"] == 2).astype(np.int8)
     panel_df["cluster_3_high_activity"] = (panel_df["cluster_id"] == 3).astype(np.int8)
+
+    # 7. Explicit duplicate check on final Feature Store
+    fs_dups = int(panel_df.duplicated(subset=["timestamp_utc", "oblast"]).sum())
+    print(f"🧹 Перевірка дублікатів у Feature Store (timestamp_utc, oblast): {fs_dups}")
+    assert fs_dups == 0, f"Знайдено {fs_dups} дублікатів у Feature Store!"
 
     print(f"💾 Збереження {len(panel_df):,} рядків матриці ознак у {output_file}...")
     panel_df.to_parquet(output_file, engine="pyarrow", index=False)

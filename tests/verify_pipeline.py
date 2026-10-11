@@ -71,10 +71,10 @@ def verify_pipeline():
         ("clusters_train_only.csv", 24),
         ("spatial_lead_lag_summary.csv", 49),
         ("baselines_benchmark.csv", 3),
-        ("ml_validation_benchmark.csv", 7),
-        ("ml_models_benchmark.csv", 7),
-        ("ml_recent_60d_benchmark.csv", 7),
-        ("feature_importance_lightgbm.csv", 13),
+        ("ml_validation_benchmark.csv", 9),
+        ("ml_models_benchmark.csv", 9),
+        ("ml_recent_60d_benchmark.csv", 9),
+        ("feature_importance_lightgbm.csv", 22),
     ]
     for csv_name, min_rows in expected_csvs:
         csv_path = reports_dir / csv_name

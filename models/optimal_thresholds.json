@@ -2,8 +2,10 @@
   "Baseline 1: True Naive Persistence": 0.5,
   "Baseline 2: Historical Lookup Table": 0.085234899328859,
   "Baseline 3: Adaptive 14-day Rolling": 0.0891946308724832,
-  "LogReg (No Spatial)": 0.5208053691275167,
-  "LogReg (With Spatial)": 0.5722818791946308,
-  "LightGBM (No Spatial)": 0.09315436241610738,
-  "LightGBM (With Spatial)": 0.10503355704697985
+  "LogReg (Set A: No Spatial)": 0.5175862068965517,
+  "LogReg (Set B: With Spatial)": 0.5612068965517241,
+  "LogReg (Set C: Spatial + Adaptive)": 0.5651724137931033,
+  "LightGBM (Set A: No Spatial)": 0.0932758620689655,
+  "LightGBM (Set B: With Spatial)": 0.10913793103448274,
+  "LightGBM (Set C: Spatial + Adaptive)": 0.1289655172413793
 }
