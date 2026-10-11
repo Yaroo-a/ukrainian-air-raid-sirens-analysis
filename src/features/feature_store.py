@@ -1,19 +1,19 @@
 """Feature Store Generator for Machine Learning Forecasting (Phase 2.1 - Refactored).
 
 Transforms historical alert events into a regular hourly panel dataset (X, y)
-for 24 Ukrainian regions with strict Data Leakage protections:
+for 24 Ukrainian regions with causal feature definitions:
 1. Precise decision timestamp T (hourly grid in UTC).
 2. Conditioning on calm periods: filtered strictly to rows where alert is NOT active at T (is_active_T == 0).
-3. Target variable y_T: Onset of a new alert in interval (T, T + 60 min].
-4. True temporal lag: lagged_onset_1h computed on full temporal grid BEFORE filtering calm rows.
-5. Adaptive baseline feature: adaptive_rate_14d computed on rolling past 14 days strictly before T.
-6. Cyclical temporal transforms: hour_sin, hour_cos, day_of_week, is_weekend, month at moment T.
-7. Autoregressive burden: burden_last_6h, burden_last_24h before moment T (closed="left").
+3. Target variable y_T: Onset of a new alert in the half-open interval [T, T + 1h) (via k_onset = s_sec // 3600).
+4. True temporal lag: lagged_onset_1h indicates whether an alert started in [T - 1h, T) on the full hourly grid BEFORE filtering calm rows.
+5. Adaptive baseline feature: adaptive_rate_14d computed on rolling past 14 days (336 hours) strictly before T (closed="left").
+6. Cyclical temporal transforms: hour_sin, hour_cos, day_of_week, is_weekend, month at moment T (Europe/Kyiv).
+7. Autoregressive burden: burden_last_6h, burden_last_24h over [T - 6h, T) and [T - 24h, T) (closed="left").
 8. Spatial neighbor features at exact moment T: neighbors_active_count, neighbor_any_active, neighbor_active_ratio.
-9. Regional clusters: read strictly from reports/clusters_train_only.csv (Train-only fit).
-   - cluster_1_low_activity (Rear)
-   - cluster_2_medium_activity (Center/Transit)
-   - cluster_3_high_activity (High exposure / Front & Border)
+9. Regional clusters: read strictly from reports/clusters_train_only.csv (Train-only fit):
+   - cluster_1_low_activity
+   - cluster_2_medium_activity
+   - cluster_3_high_activity
 10. Purging & Embargo: 2-hour buffer at Train/Val and Val/Test boundaries.
 11. Output: data/processed/ml_features_hourly.parquet.
 """
@@ -101,7 +101,7 @@ def generate_feature_store(
         if k_end >= k_start:
             active_at_T[k_start:k_end + 1, o_idx] = 1
 
-        # Alert starts in window (T_k, T_k + 1h]
+        # Alert starts in half-open window [T_k, T_k + 1h)
         k_onset = int(s_sec // 3600)
         if 0 <= k_onset < n_hours:
             onset_next_1h[k_onset, o_idx] = 1
@@ -143,7 +143,7 @@ def generate_feature_store(
         own_active = active_at_T[:, o_idx]
         target = onset_next_1h[:, o_idx]
 
-        # TRUE temporal lag: did an onset occur in the immediately preceding hour (T-1, T] on full grid?
+        # TRUE temporal lag: did an onset occur in the immediately preceding hour [T-1h, T) on full grid?
         lagged_onset_1h = np.zeros(n_hours, dtype=np.int8)
         lagged_onset_1h[1:] = target[:-1]
 

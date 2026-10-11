@@ -4,28 +4,30 @@
 
 [![Python 3.14](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Data](https://img.shields.io/badge/Dataset-130k%20Alerts-red.svg)](https://github.com/Vadimkin/ukrainian-air-raid-sirens-dataset)
+[![Data](https://img.shields.io/badge/Dataset-299k%20Raw%20%7C%2084.9k%20Oblast-red.svg)](https://github.com/Vadimkin/ukrainian-air-raid-sirens-dataset)
 [![Storage](https://img.shields.io/badge/Storage-Apache%20Parquet-green.svg)](https://parquet.apache.org/)
-[![ML](https://img.shields.io/badge/Model-LightGBM%20%7C%20Adaptive-orange.svg)](reports/ml_models_benchmark.csv)
-[![Data Leakage Test](https://img.shields.io/badge/Leakage%20Test-Passed%20100%25-brightgreen.svg)](tests/test_leakage_invariance.py)
+[![ML](https://img.shields.io/badge/Models-LightGBM%20%7C%20LogReg%20%7C%20Adaptive-orange.svg)](reports/ml_models_benchmark.csv)
 
-A comprehensive data science and machine learning research project analyzing the spatial-temporal dynamics of air raid sirens across Ukraine (March 15, 2022 – September 5, 2026) using officially verified open records.
+A research project analyzing the spatial-temporal patterns of air raid sirens across Ukraine (March 2022 – September 2026) and forecasting the onset of new alerts during calm periods.
 
-The repository bridges **exploratory time series analysis (EDA, RQ1–RQ3)** and a **rigorous causal machine learning system (ML)** designed to forecast the onset of new alerts during periods of calm ($T \to T+1$h).
+The project combines **exploratory time series analytics (Stage 1: RQ1–RQ3)** with **machine learning forecasting (Stage 2: predicting alert onsets in $[T, T+1\text{h})$)**.
 
-> **Data Source Verification:**  
-> Sourced from the official verified archive [Vadimkin/ukrainian-air-raid-sirens-dataset](https://github.com/Vadimkin/ukrainian-air-raid-sirens-dataset) (upstream commit 08.09.2026).  
-> Raw data file hash (`data/raw/official_data_uk.csv`):  
-> `SHA-256: 1f50085481d229f57b624d83b1ce723e884dea409c14afb5b7040c8a2f233e4f` (Git blob: `71d70c0ca54968f530d596cf315616fa858800e1`).
+> **Dataset Metadata & Verification:**  
+> * **Source:** [Vadimkin/ukrainian-air-raid-sirens-dataset (`datasets/official_data_uk.csv`)](https://github.com/Vadimkin/ukrainian-air-raid-sirens-dataset)  
+> * **Download Date:** `2026-10-11`  
+> * **Raw File SHA-256 (`data/raw/official_data_uk.csv`):** `1f50085481d229f57b624d83b1ce723e884dea409c14afb5b7040c8a2f233e4f`  
+> * **Raw Row Count:** `299,275` rows (`185,430` unique records after removing `113,845` exact duplicate rows in the raw CSV; breakdown by level: `oblast` — 130,235, `raion` — 132,251, `hromada` — 36,789).  
+> * **Actual Timestamp Span in Raw CSV:** `min(started_at) = 2022-03-15 16:10:34 UTC`, `max(started_at) = 2026-09-07 05:28:22 UTC`.  
+> * **Oblast-Level Interval Reconstruction (`data/processed/alerts_clean_oblast.parquet`):** Beginning in August–November 2025, official alert logging for 23 oblasts (all except Kyiv City) transitioned from `level == 'oblast'` to district (`raion`) and community (`hromada`) granularity (`oblast` records dropped from ~1,500–3,000/month to 22–328/month). To prevent an artificial drop in alert frequency during the Test period, `src/data/cleaner.py` reconstructs oblast-level alerts from `2025-08-01` onward by merging overlapping `[started_at, finished_at]` intervals across `oblast`, `raion`, and `hromada` within each oblast. The resulting cleaned dataset contains **`84,908`** continuous oblast-level intervals (`84,907` across the 24 regular regions plus `1` in Luhansk Oblast).
 
 ---
 
 ## 📑 Table of Contents
 1. [Key Findings from Exploratory Analysis (RQ1–RQ3)](#-key-findings-from-exploratory-analysis-rq1rq3)
 2. [Machine Learning: Alert Onset Forecasting](#-machine-learning-alert-onset-forecasting)
-3. [Intuitive Interpretation: How the Predictions Work](#-intuitive-interpretation-how-the-predictions-work)
-4. [Ablation Study: Quantifying Spatial Propagation](#-ablation-study-quantifying-spatial-propagation)
-5. [Causal Integrity & Zero Data Leakage](#-causal-integrity--zero-data-leakage)
+3. [Result Interpretation & Fair Model Comparison](#-result-interpretation--fair-model-comparison)
+4. [Ablation Study: Contribution of Spatial Features](#-ablation-study-contribution-of-spatial-features)
+5. [Causal Invariance Verification & Methodological Limitations](#-causal-invariance-verification--methodological-limitations)
 6. [Quickstart Guide](#-quickstart-guide)
 7. [Repository Structure](#-repository-structure)
 
@@ -34,134 +36,162 @@ The repository bridges **exploratory time series analysis (EDA, RQ1–RQ3)** and
 ## 🔬 Key Findings from Exploratory Analysis (RQ1–RQ3)
 
 ### 1. Temporal Cyclicity (RQ1)
-* **Weekly Pattern (Kruskal-Wallis Test):** $H = 13.72, \ p = 0.033$. Statistically significant inter-day variation. Peak alert activity occurs Wednesday–Friday (median 92–94 alerts/day nationally), dropping to a minimum on Sunday (78 alerts/day, $-15\%$).
-* **Temporal Shift (Evolution 2022 ➔ 2026):** In 2022, attack activity concentrated during daylight hours (09:00–19:00). In 2024–2026, systematic Shahed-136 loitering munition waves created an enduring nighttime plateau (00:00–05:00), raising the nocturnal alert share from **$20.2\%$ to $30.7\%$**.
-* **Alert Duration:** Median duration is **40.4 minutes**, while the arithmetic mean is **79.7 minutes** (heavy right-tailed distribution caused by prolonged strategic aviation operations).
+* **Weekly Pattern (Kruskal-Wallis Test):** $H = 25.52, \ p = 2.74 \times 10^{-4}$ (3 statistically significant day pairs after Bonferroni correction $\alpha_{\text{adj}} = 0.00238$). Peak activity occurs Wednesday–Friday (median 52–53 merged oblast alerts/day, mean 53.4–55.0), reaching a minimum on Sunday (median 47, mean 46.8 alerts/day).
+* **Diurnal Profile & Nocturnal Alerts (00:00–05:59 Europe/Kyiv):** Once post-August 2025 district-level alerts are properly aggregated into oblast intervals, the share of alerts starting at night remains stable between **$20.2\%$ and $24.0\%$** across years (2022: $24.0\%$, 2023: $21.5\%$, 2024: $20.2\%$, 2025: $20.5\%$, 2026: $22.9\%$).
+* **Alert Duration:** Median duration of a merged oblast interval is **43.15 min**, while the mean is **102.40 min** ($Q_{25} = 26.38$ min, $Q_{75} = 100.66$ min, $Q_{95} = 329.06$ min).
 
 <p align="center">
   <img src="reports/figures/01_heatmap_24x7.png" alt="24x7 Alert Activity Heatmap" width="85%">
-  <br><em>Figure 1. Heatmap of alert intensity across hours of the day and days of the week (24×7).</em>
+  <br><em>Figure 1. Heatmap of alert onset counts by hour of day (Europe/Kyiv) and day of week (2022–2026).</em>
 </p>
 
 <p align="center">
   <img src="reports/figures/02_hourly_evolution_by_year.png" alt="Evolution of hourly distribution by year" width="85%">
-  <br><em>Figure 2. Yearly shift from daylight raid peaks (2022) to nighttime drone barrage plateaus (2024–2026).</em>
+  <br><em>Figure 2. Diurnal profile of alert onsets by year (percentage share of annual alerts).</em>
 </p>
 
 ---
 
-### 2. Regional Safety Clusters (RQ2)
-Hierarchical agglomerative clustering (Ward linkage, Euclidean distance on 5 standardized burden features, Silhouette score = 0.385) identified 3 geographic macro-zones across Ukraine:
-* **Cluster 1 (Deep Rear, 11 oblasts):** Western Ukraine + Zhytomyr, Kyiv, Vinnytsia. Average monthly burden: 38.4 alerts/month.
-* **Cluster 2 (Transit Central / North, 11 oblasts):** Center, North, South, and Kyiv City. Average monthly burden: 144.9 alerts/month; characterized by brief alerts ($\le 30$ min) driven by ballistic warnings.
-* **Cluster 3 (Frontline Zone, 2 oblasts):** Donetsk and Sumy. Average monthly burden: 203.8 alerts/month; $>30\%$ of alerts exceed 2 hours due to tactical aviation and guided aerial bomb (KAB) coverage.
+### 2. Regional Clustering: Descriptive (RQ2) vs. ML (Train-Only)
+The repository strictly separates **descriptive full-period clustering** (used for RQ2) from **Train-only clustering** (used as input features for ML models):
+
+1. **Descriptive RQ2 Clustering (`reports/regional_clusters_summary.csv`, full period 2022–2026, Ward linkage, Silhouette = 0.4417 at $K=3$):**
+   * **Cluster 1 — Deep Rear / West & North-West (12 regions):** Ivano-Frankivsk, Volyn, Vinnytsia, Zhytomyr, Zakarpattia, Kyiv Oblast, Lviv, Rivne, Ternopil, Khmelnytskyi, Chernivtsi, Kyiv City (avg 25.8 alerts/month, median duration 46.4 min).
+   * **Cluster 2 — Transit Center & South (7 regions):** Dnipropetrovsk, Kirovohrad, Mykolaiv, Odesa, Poltava, Kherson, Cherkasy (avg 90.3 alerts/month, median duration 36.0 min).
+   * **Cluster 3 — Frontline / Border Zone (5 regions):** Donetsk, Zaporizhzhia, Sumy, Kharkiv, Chernihiv (avg 128.3 alerts/month, median duration 57.3 min, share of alerts $\ge 2$h: 28.7%).
+2. **ML Train-Only Clusters (`reports/clusters_train_only.csv`, fitted strictly on Train `<= 2024-04-30 23:59:59 UTC` via `generate_train_only_clusters()` in `src/features/clustering.py` with neutral names):**
+   * `cluster_1_low_activity` (`low_activity`, 7 western oblasts): Ivano-Frankivsk, Volyn, Zakarpattia, Lviv, Rivne, Ternopil, Chernivtsi (17.4–22.1 alerts/month).
+   * `cluster_2_medium_activity` (`medium_activity`, 5 central/north-western regions): Vinnytsia, Zhytomyr, Kyiv Oblast, Khmelnytskyi, Kyiv City (24.2–38.2 alerts/month).
+   * `cluster_3_high_activity` (`high_activity`, 12 eastern, southern, and central oblasts): Dnipropetrovsk, Donetsk, Zaporizhzhia, Kirovohrad, Mykolaiv, Odesa, Poltava, Sumy, Kharkiv, Kherson, Cherkasy, Chernihiv (44.0–168.8 alerts/month).
 
 <p align="center">
   <img src="reports/figures/05_regional_dendrogram.png" alt="Regional Dendrogram" width="85%">
-  <br><em>Figure 3. Ward hierarchical dendrogram clustering all 24 administrative regions of Ukraine.</em>
+  <br><em>Figure 3. Ward hierarchical dendrogram of the 24 regions of Ukraine (RQ2, full period).</em>
 </p>
 
 ---
 
-### 3. Spatial Threat Propagation Routes (RQ3)
-* Isolated $>1,000$ hours of synchronized nationwide alerts ($\ge 15$ oblasts simultaneously during MiG-31K takeoffs) to eliminate spurious zero-latency artifacts.
-* Across a network graph of 49 directly adjacent oblast pairs, lead-lag cross-correlations revealed physical flight delays of **10–20 minutes** along primary transit vectors (Khmelnytskyi ➔ Vinnytsia $r=0.45$, Cherkasy ➔ Kirovohrad $r=0.60$).
+### 3. Spatial Cross-Correlations Between Neighbors (RQ3)
+* After filtering out synchronized nationwide alerts ($\ge 15$ oblasts simultaneously) on a 10-minute discrete grid, cross-correlations with lags $\tau \in [-180, +180]$ min were computed for all 49 contiguous region pairs (`reports/spatial_lead_lag_summary.csv`).
+* Strongest couplings occur along southern, eastern, and central corridors: Mykolaiv $\leftrightarrow$ Kherson ($r = 0.658$, lag 10 min), Dnipropetrovsk $\leftrightarrow$ Zaporizhzhia ($r = 0.613$), Ivano-Frankivsk $\leftrightarrow$ Lviv ($r = 0.602$, lag 10 min), Kyiv City $\leftrightarrow$ Kyiv Oblast ($r = 0.578$, lag 10 min), Chernihiv $\leftrightarrow$ Sumy ($r = 0.574$, lag 10 min).
 
 <p align="center">
   <img src="reports/figures/06_spatial_cross_correlation_routes.png" alt="Spatial Cross-Correlation Routes" width="85%">
-  <br><em>Figure 4. Cross-correlation lead-lag flight delays between contiguous regions along typical flight corridors.</em>
+  <br><em>Figure 4. Top-15 adjacent region pairs by cross-correlation strength and directional lead-lag breakdown.</em>
 </p>
 
 ---
 
 ## 🤖 Machine Learning: Alert Onset Forecasting
 
-### Problem Formulation
-* **Calm-Period Conditioning:** Predictions are generated strictly when no siren is active in the region (`is_active_T == 0`).
-* **Target:** Predict whether an alert starts in the upcoming one-hour window $(T, T+1\text{h}]$: $y_T = 1$.
-* **Causal Features:** All indicators are computed over historical rolling windows $[T-k, T]$ strictly closed on the left (`closed='left'`).
-* **Leakage-Free Clustering:** For ML features, regional clusters are trained **strictly on the Train set (2022–2024)** (`reports/clusters_train_only.csv`).
+### Problem Formulation & Feature Engineering
+* **Decision Timestamp $T$:** Regular hourly grid in UTC (`timestamp_utc`).
+* **Calm-Period Conditioning:** `ml_features_hourly.parquet` retains strictly those observations where no alert is active in the region at moment $T$ (`is_active_T == 0`), totaling `797,428` calm region-hours across 24 regions.
+* **Target Variable (`target_onset_next_1h`):** $y_T = 1$ if a new alert starts in the region during the half-open interval **$[T, T + 1\text{h})$** (implemented as `k_onset = int(s_sec // 3600)`).
+* **Historical & Adaptive Lags:**
+  * `lagged_onset_1h` — indicator of whether an alert started in $[T - 1\text{h}, T)$ (computed on the full hourly grid before calm filtering).
+  * `burden_last_6h`, `burden_last_24h` — fraction of active hours in $[T - 6\text{h}, T)$ and $[T - 24\text{h}, T)$ (`closed="left"`).
+  * `adaptive_rate_14d` — empirical onset frequency in the region over the preceding 336 hours $[T - 336\text{h}, T)$ (`closed="left"`).
 
-### Final Test Benchmark (Test: 2025–2026)
-*Evaluated on 254,830 calm hourly periods, with 5,631 true alert onsets (positive base rate $2.21\%$).*
+### Chronological Data Splits (UTC, with 2-hour Embargo Buffer)
+* **Train:** `2022-03-15` – `2024-04-30` (`410,150` calm hours, `33,240` onsets, base rate **$8.10\%$**).
+* **Validation:** `2024-05-01` – `2025-05-31` (`190,195` calm hours, `19,342` onsets, base rate **$10.17\%$**).
+* **Test:** `2025-06-01` – `2026-09-07` (`197,083` calm hours, `464` calendar days, `20,250` onsets, base rate **$10.27\%$**).
+* **Latest 60 Days (Test subset):** `2026-07-09` – `2026-09-07` (`23,646` calm hours, `2,992` onsets, base rate **$12.65\%$**).
 
-| Model | Feature Set | Threshold $p^*$ (from Val) | Test PR-AUC [95% CI] | Test $F_2$-Score [95% CI] | Precision | Recall | Brier Score |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Baseline 1: True Naive** | Lagged onset at $T-1$ | 0.500 | — | 0.0686 | 18.3% | 5.9% | 0.0267 |
-| **Baseline 2: Historical Lookup** | Historical rate (Kyiv time) | 0.085 | 0.0334 [0.031, 0.036] | 0.1421 [0.140, 0.146] | 3.4% | 67.7% | 0.0273 |
-| **Baseline 3: Adaptive 14-day** | 14-day rolling rate | 0.089 | 0.2205 [0.214, 0.227] | **0.4001** [0.390, 0.407] | 17.7% | 58.4% | **0.0189** |
-| **LogReg (No Spatial)** | Time + Intensity | 0.521 | 0.2219 [0.215, 0.228] | 0.2423 [0.239, 0.248] | 6.9% | 65.7% | 0.1734 |
-| **LogReg (With Spatial)** | Time + Intensity + Neighbors | 0.572 | 0.2215 [0.215, 0.228] | 0.4000 [0.392, 0.407] | 16.7% | 61.5% | 0.1612 |
-| **LightGBM (No Spatial)** | Time + Intensity | 0.093 | 0.2135 [0.207, 0.220] | 0.3354 [0.329, 0.342] | 11.6% | 63.3% | 0.0208 |
-| **LightGBM (With Spatial)** | Time + Intensity + Neighbors | 0.105 | **0.2378** [0.231, 0.245] | 0.3823 [0.375, 0.390] | 13.8% | **68.5%** | 0.0203 |
+---
+
+### Table 1. Full Test Set Benchmark (Test: June 2025 – September 2026)
+*95% confidence intervals are computed via **Day-Block Bootstrap** resampling calendar days (`n_bootstraps = 500`). `Prec @ R=78.2%` reports each model's Precision at the exact Recall level of the Adaptive Baseline (`Recall = 78.23%`).*
+
+| Model | Feature Set | Threshold $p^*$ (from Val) | Test PR-AUC [95% CI] | Test $F_2$ [95% CI] | Precision | Recall | Prec @ R=78.2% | Brier Score |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Baseline 1: True Naive** | Lagged onset in $[T-1\text{h}, T)$ | 0.500 | — | 0.1034 [0.096, 0.111] | 29.1% | 8.9% | — | 0.1159 |
+| **Baseline 2: Historical Lookup** | Train lookup rate (Kyiv) | 0.085 | 0.2204 [0.212, 0.228] | 0.5033 [0.495, 0.511] | 22.7% | 72.3% | 21.1% | 0.0868 |
+| **Baseline 3: Adaptive 14-day** | 14-day rolling onset rate | 0.089 | 0.3031 [0.292, 0.315] | 0.5299 [0.520, 0.538] | 23.1% | 78.2% | 23.1% | 0.0818 |
+| **LogReg (No Spatial)** | A: Time + Burden + Cluster | 0.521 | 0.3881 [0.377, 0.399] | 0.5325 [0.524, 0.541] | 23.7% | 77.5% | 23.4% | 0.2007 |
+| **LogReg (With Spatial)** | B: Time + Burden + Neighbors | 0.572 | **0.3903** [0.380, 0.400] | 0.5505 [0.542, 0.559] | 24.3% | 80.4% | 25.1% | 0.2337 |
+| **LightGBM (No Spatial)** | A: Time + Burden + Cluster | 0.093 | 0.3482 [0.337, 0.359] | 0.5378 [0.529, 0.546] | **25.4%** | 74.6% | 23.5% | 0.0784 |
+| **LightGBM (With Spatial)** | B: Time + Burden + Neighbors | 0.105 | 0.3741 [0.363, 0.386] | **0.5597** [0.551, 0.568] | 23.2% | **86.4%** | **26.8%** | **0.0761** |
+
+---
+
+### Table 2. Latest 60 Days Benchmark (09.07.2026 – 07.09.2026, `reports/ml_recent_60d_benchmark.csv`)
+*Subset: 23,646 calm hours, 2,992 alert onsets (base rate 12.65%). Thresholds $p^*$ are frozen from Validation.*
+
+| Model | Threshold $p^*$ | PR-AUC [95% CI] | $F_2$-Score [95% CI] | Precision | Recall | Prec @ R=90.4% | Brier Score |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Baseline 1: True Naive** | 0.500 | — | 0.1621 [0.145, 0.181] | 39.2% | 14.1% | — | 0.1364 |
+| **Baseline 2: Historical Lookup** | 0.085 | 0.3258 [0.295, 0.357] | 0.5886 [0.564, 0.613] | 33.1% | 73.0% | 21.9% | 0.1038 |
+| **Baseline 3: Adaptive 14-day** | 0.089 | 0.3682 [0.333, 0.406] | 0.6430 [0.620, 0.664] | 29.9% | 90.4% | 29.9% | 0.0911 |
+| **LogReg (No Spatial)** | 0.521 | **0.5058** [0.480, 0.531] | 0.6533 [0.635, 0.674] | 35.6% | 82.6% | 29.4% | 0.1693 |
+| **LogReg (With Spatial)** | 0.572 | 0.4788 [0.444, 0.510] | 0.6494 [0.625, 0.674] | 33.0% | 85.7% | **30.2%** | 0.2064 |
+| **LightGBM (No Spatial)** | 0.093 | 0.4501 [0.423, 0.477] | **0.6558** [0.639, 0.674] | **37.0%** | 81.3% | 29.4% | 0.0885 |
+| **LightGBM (With Spatial)** | 0.105 | 0.4541 [0.424, 0.481] | 0.6429 [0.615, 0.669] | 29.7% | **90.7%** | **30.2%** | **0.0853** |
 
 <p align="center">
-  <img src="reports/figures/10_test_pr_curves_comparison.png" alt="Test PR Curves Comparison" width="85%">
-  <br><em>Figure 5. Precision-Recall curves on Test (2025–2026). LightGBM With Spatial achieves top PR-AUC = 0.2378.</em>
+  <img src="reports/figures/10_test_pr_curves_comparison.png" alt="Test and Recent 60d PR Curves Comparison" width="95%">
+  <br><em>Figure 5. Precision-Recall curves on the full Test set (left) and the latest 60 days (right).</em>
 </p>
 
 ---
 
-## 💡 Intuitive Interpretation: How the Predictions Work
+## 💡 Result Interpretation & Fair Model Comparison
 
-1. **Background Rate vs. Alert Spikes:**
-   In an arbitrary calm hour, the chance of a siren starting in the subsequent hour is only **~2.2–2.4%** (1 in 40 class imbalance). During quiet hours, model predictions remain between $0.5\% – 1.5\%$.
-2. **Threat Surge Detection:**
-   When nocturnal drone strikes begin and neighboring border regions trigger alerts, the model elevates risk assessments for downstream transit regions up to **$15\% – 35\%+$**.
-3. **Operational Threshold $p^* = 0.105$ (10.5%):**
-   In civil defense and early warning, missing an attack is far costlier than a false alarm ($F_2$ optimization prioritizing $Recall$ over $Precision$):
-   * The model successfully detects **68.5% (nearly 7 in 10)** of all impending alert onsets.
-   * Among all raised warnings, **13.8%** result in sirens, representing a **~6x concentration of risk** over the baseline background rate ($2.2\%$). When the model issues an alert, danger is 6 times higher than normal.
-4. **Probability Calibration:**
-   A Brier Score of **0.0203** reflects robust probability calibration across the spectrum.
+1. **Resolution of the Logging Format Artifact:**  
+   When post-August 2025 oblast alerts are reconstructed from district/community intervals, the Test positive rate is **10.27%** (compared to 8.10% on Train and 10.17% on Val). Consequently, the static `Historical Lookup` baseline remains competitive ($F_2 = 0.5033$), and the `Adaptive 14-day Rolling` baseline achieves **$F_2 = 0.5299$, PR-AUC = 0.3031**.
+2. **Comparison Against the Best Baseline:**  
+   * On the full Test set, **LightGBM (With Spatial)** outperforms `Adaptive 14-day Rolling` on both primary metrics: paired Day-Block Bootstrap ($N=500$) shows **$\Delta \text{PR-AUC} = +0.0711$** (95% CI $[+0.0613, +0.0812]$, **$+23.4\%$** relative gain) and **$\Delta F_2 = +0.0296$** (95% CI $[+0.0247, +0.0353]$, **$+5.6\%$** relative gain).
+   * Because comparing raw Recall across different thresholds and Precision levels is invalid, we evaluate all models at a fixed operating point matching the Adaptive Baseline's Recall (`Recall = 78.23%`): **LightGBM (With Spatial)** achieves **Precision = 26.81%** vs. **23.14%** for the Adaptive Baseline (`LogReg With Spatial` achieves **25.14%**).
+   * On the **latest 60 days**, the `Adaptive 14-day Rolling` baseline achieves $F_2 = 0.6430$, matching `LightGBM (With Spatial)` ($F_2 = 0.6429$), while ML models retain a substantial advantage in ranking (PR-AUC $0.4541$–$0.5058$ vs. $0.3682$).
+3. **Predicted Probability Quantiles & Calibration:**  
+   * On Test, empirical quantiles of `LightGBM (With Spatial)` predicted probabilities are: $Q_{10} = 1.54\%$, $Q_{25} = 2.44\%$, Median ($Q_{50}$) $= 4.96\%$, $Q_{75} = 18.12\%$, $Q_{90} = 29.65\%$, $Q_{95} = 36.88\%$, $Q_{99} = 42.79\%$.
+   * Unlike Logistic Regression trained with `class_weight='balanced'` (which achieves high PR-AUC $0.3903$ but produces shifted, uncalibrated probabilities with Brier Score $0.2007–0.2337$), **LightGBM** achieves well-calibrated probability estimates (**Brier Score = 0.0761** on Test and **0.0853** on the last 60 days).
 
 <p align="center">
-  <img src="reports/figures/13_calibration_reliability_diagram.png" alt="Calibration Reliability Diagram" width="85%">
-  <br><em>Figure 6. Reliability curve and predicted probability distribution for LightGBM.</em>
+  <img src="reports/figures/13_calibration_reliability_diagram.png" alt="Calibration Reliability Diagram" width="75%">
+  <br><em>Figure 6. Reliability diagram for LightGBM (With Spatial) on the Test set.</em>
 </p>
 
 ---
 
-## 🛰️ Ablation Study: Quantifying Spatial Propagation
+## 🛰️ Ablation Study: Contribution of Spatial Features
 
-A controlled experiment examining the isolated contribution of spatial neighbor features (alert activity in contiguous regions across 1, 3, and 6 hours + regional activity clusters):
-* **Gradient Boosted Trees (LightGBM):**  
-  Spatial features deliver a statistically significant improvement: **PR-AUC increases from 0.2135 to 0.2378** ($+11.4\%$ relative gain; 95% Bootstrap CIs $[0.207, 0.220]$ vs. $[0.231, 0.245]$ do not overlap).
-* **Linear Logistic Regression:**  
-  PR-AUC remains static ($0.2219 \to 0.2215$), but spatial indicators stabilize threshold tuning, elevating Precision from 6.9% to 16.7%.
-* **Scientific Takeaway:** Threat propagation across Ukraine exhibits **complex, non-linear spatial interactions** that are effectively captured by decision tree ensembles rather than linear models.
+Evaluating the addition of the 3 contiguous neighbor features (`neighbors_active_count`, `neighbor_any_active`, `neighbor_active_ratio`) via paired Day-Block Bootstrap ($N=500$ calendar days):
+* **LightGBM:** PR-AUC increases from **0.3482** to **0.3741**. The paired difference is **$\Delta \text{PR-AUC} = +0.0259$**, 95% CI **$[+0.0226, +0.0293]$** (strictly positive confidence interval — statistically significant improvement). $F_2$ increases from $0.5378$ to $0.5597$, and Precision at `Recall = 78.2%` increases from $23.5\%$ to $26.8\%$.
+* **Logistic Regression:** PR-AUC changes from **0.3881** to **0.3903**. The paired difference is **$\Delta \text{PR-AUC} = +0.0024$**, 95% CI **$[-0.0017, +0.0065]$** (confidence interval includes zero — PR-AUC difference is not statistically significant, although Precision at `Recall = 78.2%` increases from $23.4\%$ to $25.1\%$).
 
 <p align="center">
   <img src="reports/figures/11_feature_importance_lightgbm.png" alt="LightGBM Feature Importance" width="85%">
-  <br><em>Figure 7. Top-15 most influential predictors in LightGBM ranked by total information gain.</em>
+  <br><em>Figure 7. Feature importance in LightGBM (With Spatial) ranked by Total Gain.</em>
 </p>
 
-#### Primary Risk Drivers:
-1. `burden_last_24h` (Gain 95.7k) — Rolling 24-hour national attack intensity.
-2. `cluster_3_high_activity` (Gain 72.7k) — Region location in the high-intensity eastern/southern zone.
-3. `neighbors_active_count` (Gain 32.1k) — Number of adjacent regions currently experiencing active alerts (outweighs time of day).
+#### Top-3 Features by Gain in LightGBM (`reports/feature_importance_lightgbm.csv`):
+1. `burden_last_24h` (Gain `95,669`) — fraction of active hours over the past 24 hours.
+2. `cluster_3_high_activity` (Gain `72,662`) — Train-fitted high-activity regional cluster indicator.
+3. `neighbors_active_count` (Gain `32,142`) — number of contiguous oblasts with an active alert at moment $T$.
 
 ---
 
-## 🛡️ Causal Integrity & Zero Data Leakage
+## 🛡️ Causal Invariance Verification & Methodological Limitations
 
-Methodological validity is enforced via strict engineering protocols:
-1. **Strict Chronological Splits:**
-   * **Train (47.9%):** 15.03.2022 – 30.04.2024 (410,150 rows).
-   * **Validation (22.2%):** 01.05.2024 – 31.05.2025 (190,195 rows).
-   * **Test (29.8%):** 01.06.2025 – 05.09.2026 (254,830 rows).
-2. **2-Hour Embargo Buffer:** Excludes transitional boundary records so that forecasting target intervals never cross split partitions.
-3. **Train-Only Clustering:** ML cluster weights are fitted strictly on Train data prior to April 30, 2024 (`reports/clusters_train_only.csv`).
-4. **Calm-Conditioned Scope:** Models are evaluated solely when sirens are inactive at $T$ (`is_active_T == 0`).
-5. **Causal Active Status:** Eliminates retrospective `is_finished` indicators (zero knowledge of future alert end times).
-6. **Automated Invariance Verification (`tests/test_leakage_invariance.py`):**  
-   At randomly sampled timestamps $T$, raw input data is physically truncated at $T$, features are recomputed from scratch, and compared against the Feature Store. The test confirms 100% numerical invariance.
+### What `tests/test_leakage_invariance.py` Verifies
+The test samples $N = 25$ random timestamps $T$ (534 region-hour rows across Train, Validation, and Test) and performs two checks:
+1. **Future Truncation Invariance at $T$:** All alerts with `started_at > T` are removed, and for alerts ongoing at $T$ (`finished_at > T`), `finished_at` is masked (treated as open at $T$). From this truncated history, the test independently recomputes the calm filter `is_active_T == 0`, `lagged_onset_1h`, rolling burdens `burden_last_6h` and `burden_last_24h`, 14-day frequency `adaptive_rate_14d`, spatial neighbor indicators (`neighbors_active_count`, `neighbor_any_active`, `neighbor_active_ratio`), and calendar transforms, verifying numerical agreement (`atol=1e-6`) with `ml_features_hourly.parquet`.
+2. **Target Window $[T, T + 1\text{h})$ Dependence:** Verifies that `target_onset_next_1h` matches the binary indicator computed solely from alerts with `started_at` in $[T, T + 1\text{h})$.
+
+### ⚠️ Methodological Limitations & Caveats
+1. **Micro-Alert Filtering ($< 60$ s):** During preprocessing in `src/data/cleaner.py`, technical glitches shorter than 60 seconds are filtered using `finished_at - started_at`. For an alert starting less than 60 seconds before $T$, filtering relies on its completion time.
+2. **Sub-Regional Aggregation After 2025-08-01:** Reconstructing oblast alerts as the union of intervals across `oblast`, `raion`, and `hromada` preserves time-series continuity after the logging transition, but treats localized district alerts as oblast-level activity.
+3. **Train Boundary Duration Censoring:** In `generate_train_only_clusters()`, durations of alerts crossing `2024-04-30 23:59:59 UTC` are censored at `train_end`, whereas descriptive RQ2 profiles (`regional_clusters_summary.csv`) span the full 2022–2026 period.
+4. **Shared Validation Set for Early Stopping and Threshold Tuning:** The Validation split is used both for LightGBM early stopping (`stopping_rounds=30`) and for selecting the classification threshold $p^* = \arg\max F_2$.
+5. **UTC Split Boundaries vs. Local Time Features:** Chronological split boundaries (`2024-04-30 23:59:59 UTC` and `2025-05-31 23:59:59 UTC`) are defined in UTC, whereas diurnal cyclical features and Historical Lookup tables operate in `Europe/Kyiv` time.
 
 ---
 
 ## 🚀 Quickstart Guide
 
-### 1. Clone & Set Up Environment
+### 1. Clone & Install Dependencies
 ```bash
 git clone https://github.com/Yaroo-a/ukrainian-air-raid-sirens-analysis.git
 cd ukrainian-air-raid-sirens-analysis
@@ -170,27 +200,34 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Run Interactive Notebooks
+### 2. Run Full Reproducible Pipeline from Scratch
 ```bash
-jupyter lab
-```
-* `notebooks/01_data_profiling_and_cleaning.ipynb` — Data profiling, type casting, and sanity audits.
-* `notebooks/02_rq1_temporal_cyclicity.ipynb` — Weekly/diurnal patterns & Kruskal-Wallis testing.
-* `notebooks/03_rq2_regional_clustering.ipynb` — Regional vulnerability profiling & agglomerative clustering.
-* `notebooks/04_rq3_spatial_propagation_routes.ipynb` — Lead-lag cross-correlations between adjacent regions.
-* `notebooks/05_ml_forecasting_experiment.ipynb` — End-to-end ML: feature generation, baselines, and ablation.
+# Stage 1: Cleaning, interval aggregation, cyclicity, clustering (RQ2 + Train-only ML), and propagation
+python src/data/cleaner.py
+python src/features/cyclicity.py
+python src/features/clustering.py
+python src/features/propagation.py
 
-### 3. Execute Automated Pipeline
-```bash
-# Run data leakage invariance test
-python tests/test_leakage_invariance.py
-
-# Generate features, train models, and evaluate on Test
+# Stage 2: Feature Store generation, baselines, model training, and Test evaluation (Day-Block Bootstrap N=500)
 python src/features/feature_store.py
 python src/models/baselines.py
 python src/models/train_models.py
 python src/models/evaluate_test.py
+
+# Artifact verification and causal truncation invariance tests
+python tests/verify_pipeline.py
+python tests/test_leakage_invariance.py
 ```
+
+### 3. Interactive Jupyter Notebooks
+```bash
+jupyter lab
+```
+* `notebooks/01_data_profiling_and_cleaning.ipynb` — Raw data profiling, deduplication, and interval merging.
+* `notebooks/02_rq1_temporal_cyclicity.ipynb` — Weekly/diurnal patterns and Kruskal-Wallis tests.
+* `notebooks/03_rq2_regional_clustering.ipynb` — Agglomerative regional clustering.
+* `notebooks/04_rq3_spatial_propagation_routes.ipynb` — Lead-lag cross-correlations between neighbors.
+* `notebooks/05_ml_forecasting_experiment.ipynb` — ML experiments, Ablation Study, and latest 60-day evaluation.
 
 ---
 
@@ -198,36 +235,38 @@ python src/models/evaluate_test.py
 
 ```
 ├── data/
-│   ├── raw/official_data_uk.csv               # Raw alert logs (read-only, SHA-256 verified)
+│   ├── raw/official_data_uk.csv               # Raw dataset (299,275 rows, SHA-256 verified)
 │   └── processed/
-│       ├── alerts_clean_oblast.parquet        # Cleaned alert records (129,955 rows)
-│       └── ml_features_hourly.parquet         # Calm-period Feature Store (855,175 rows)
-├── models/                                    # Model weights (LightGBM, LogReg, scalers, tuned thresholds p*)
-├── notebooks/                                 # 5 interactive research Jupyter Notebooks
+│       ├── alerts_clean_oblast.parquet        # Merged oblast alert intervals (84,908 rows)
+│       └── ml_features_hourly.parquet         # Calm-period Feature Store (797,428 rows)
+├── models/                                    # Saved models (LightGBM, LogReg, Scalers, optimal_thresholds.json)
+├── notebooks/                                 # 5 executed Jupyter Notebooks
 ├── reports/
-│   ├── figures/                               # 13 high-resolution publication charts (300 DPI)
-│   ├── clusters_train_only.csv                # Train-only clustering for ML features
-│   ├── regional_clusters_summary.csv          # Regional summary profiles (RQ2)
-│   ├── spatial_lead_lag_summary.csv           # Lead-lag delay matrices (RQ3)
-│   ├── baselines_benchmark.csv                # Baseline performance benchmarks
-│   ├── ml_validation_benchmark.csv            # Validation benchmarks & threshold tuning
-│   ├── ml_models_benchmark.csv                # Final Test set benchmark with 95% Bootstrap CIs
-│   └── feature_importance_lightgbm.csv        # LightGBM feature gain ranking
+│   ├── figures/                               # 13 high-resolution figures (300 DPI)
+│   ├── clusters_train_only.csv                # Train-only ML clusters (low/medium/high_activity)
+│   ├── regional_clusters_summary.csv          # Full-period descriptive clusters (RQ2)
+│   ├── spatial_lead_lag_summary.csv           # Cross-correlations for 49 neighbor pairs (RQ3)
+│   ├── baselines_benchmark.csv                # Validation baseline benchmarks
+│   ├── ml_validation_benchmark.csv            # Validation ML benchmarks
+│   ├── ml_models_benchmark.csv                # Full Test benchmark (Day-Block Bootstrap N=500)
+│   ├── ml_recent_60d_benchmark.csv            # Latest 60-day evaluation benchmark
+│   ├── test_evaluation_details.json           # Paired bootstrap differences and probability quantiles
+│   └── feature_importance_lightgbm.csv        # LightGBM feature importance (Gain & Split)
 ├── src/
-│   ├── data/cleaner.py                        # Cleaning and typing pipeline
+│   ├── data/cleaner.py                        # Deduplication and interval merging
 │   ├── features/
-│   │   ├── cyclicity.py                       # Temporal cycle extraction
-│   │   ├── clustering.py                      # Regional clustering algorithms
-│   │   ├── propagation.py                     # Spatial lags & adjacency graph
-│   │   └── feature_store.py                   # Hourly Feature Store generator for ML
+│   │   ├── cyclicity.py                       # Temporal cyclicity analysis (RQ1)
+│   │   ├── clustering.py                      # RQ2 clustering & Train-only ML cluster generation
+│   │   ├── propagation.py                     # Spatial cross-correlations (RQ3)
+│   │   └── feature_store.py                   # Hourly ML Feature Store generator
 │   └── models/
-│       ├── baselines.py                       # Naive, historical lookup, and 14-day rolling baselines
-│       ├── train_models.py                    # Model training, spatial ablation, threshold tuning
-│       └── evaluate_test.py                   # Test evaluation, Bootstrap CIs, reliability curves
+│       ├── baselines.py                       # Naive, Historical Lookup, and Adaptive 14-day Rolling
+│       ├── train_models.py                    # LogReg, LightGBM training & threshold tuning
+│       └── evaluate_test.py                   # Test & recent 60d evaluation, Day-Block Bootstrap
 ├── tests/
-│   ├── verify_pipeline.py                     # Pipeline sanity check
-│   └── test_leakage_invariance.py             # Physical truncation data leakage test
-├── requirements.txt                           # Environment dependencies
+│   ├── verify_pipeline.py                     # End-to-end artifact integrity verification
+│   └── test_leakage_invariance.py             # Future truncation & target window invariance test
+├── requirements.txt                           # Python dependencies
 ├── LICENSE                                    # MIT License
 ├── README.md                                  # Ukrainian documentation (Default)
 └── README_EN.md                               # English documentation
@@ -235,15 +274,5 @@ python src/models/evaluate_test.py
 
 ---
 
-## 🛠️ Technology Stack
-* **Language:** Python 3.14
-* **Data Processing & Analytics:** Pandas, NumPy, SciPy, Statsmodels, PyArrow
-* **Machine Learning:** Scikit-learn, LightGBM
-* **Visualization:** Matplotlib, Seaborn, Plotly
-* **Storage Format:** Apache Parquet (Snappy compression)
-
----
-
 ## 📄 License
-Released under the [MIT License](LICENSE).  
-Data originates from the open verified archive [alerts.in.ua / Vadimkin](https://github.com/Vadimkin/ukrainian-air-raid-sirens-dataset).
+Released under the [MIT License](LICENSE). Primary data source: [Vadimkin/ukrainian-air-raid-sirens-dataset](https://github.com/Vadimkin/ukrainian-air-raid-sirens-dataset).

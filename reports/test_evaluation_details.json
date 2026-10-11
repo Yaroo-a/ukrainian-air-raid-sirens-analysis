@@ -1,0 +1,40 @@
+{
+  "test_total_rows": 197083,
+  "test_total_days": 464,
+  "test_positives": 20250,
+  "test_base_rate": 0.10274858815828863,
+  "recent_60d_rows": 23646,
+  "recent_60d_positives": 2992,
+  "recent_60d_base_rate": 0.12653302884208745,
+  "paired_day_bootstrap_500": {
+    "lgb_spatial_minus_nospatial_prauc": {
+      "mean": 0.025929266873063,
+      "ci_low": 0.02257301018516622,
+      "ci_high": 0.02926595648948142
+    },
+    "lr_spatial_minus_nospatial_prauc": {
+      "mean": 0.0023625922072557713,
+      "ci_low": -0.0016805909393073748,
+      "ci_high": 0.006497464207710457
+    },
+    "lgb_spatial_minus_adaptive_prauc": {
+      "mean": 0.07111892694659877,
+      "ci_low": 0.06126508230754233,
+      "ci_high": 0.08121412828965519
+    },
+    "lgb_spatial_minus_adaptive_f2": {
+      "mean": 0.0296305487741977,
+      "ci_low": 0.024748620835125395,
+      "ci_high": 0.035266262563380266
+    }
+  },
+  "lgb_prob_quantiles": {
+    "q10": 0.015447724551484429,
+    "q25": 0.02440866358352804,
+    "q50": 0.049593663203401514,
+    "q75": 0.1812137371026132,
+    "q90": 0.29650555886318986,
+    "q95": 0.36877676837548,
+    "q99": 0.4278824209125083
+  }
+}
