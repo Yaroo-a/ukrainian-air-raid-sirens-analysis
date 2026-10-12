@@ -45,6 +45,7 @@ echo -e "\n[7/9] Повний експеримент, аналіз чутлив�
 "$PYTHON" src/models/run_volunteer_experiment.py
 "$PYTHON" src/models/compare_official_vs_volunteer_metrics.py
 "$PYTHON" src/models/run_walk_forward_experiment.py
+"$PYTHON" src/models/analyze_walk_forward_regional.py
 
 echo -e "\n[8/9] Повне виконання всіх 5 Jupyter Notebooks з нуля (Restart & Run All)..."
 "$JUPYTER" nbconvert --to notebook --execute --inplace \

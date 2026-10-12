@@ -1,8 +1,8 @@
 """Walk-Forward (ковзне щомісячне перенавчання) для перевірки гіпотези нестаціонарності
 та виходу ознак за межі навчального діапазону на інтервалі прогнозування [T, T+1h).
 
-Заздалегідь зафіксований протокол (Pre-Specified Protocol):
-1. Головна гіпотеза (Primary Pre-Specified Hypothesis):
+Зафіксований протокол блоку Walk-Forward:
+1. Головна гіпотеза блоку WF (primary hypothesis of the WF block, specified after viewing static Test results):
    - Модель `LightGBM (Set C) [WF Rolling 12m]` (12 місяців ковзного Train + 2 місяці Val перед кожним
      тестовим місяцем M з 2-годинним embargo) проти справедливого бейзлайну
      `Baseline 3: Adaptive 14-day Rolling (WF p*_M)` за парною різницею ΔPR-AUC (Day-Block Bootstrap, N=500),
@@ -32,6 +32,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 import sys
@@ -110,9 +111,9 @@ def fast_threshold_search_f2(
     fn = np.sum((~preds) & y_b, axis=0, dtype=np.float64)
 
     denom = 5.0 * tp + 4.0 * fn + fp
-    f2 = np.where(denom > 0, (5.0 * tp) / denom, 0.0)
-    prec = np.where(tp + fp > 0, tp / (tp + fp), 0.0)
-    rec = np.where(tp + fn > 0, tp / (tp + fn), 0.0)
+    f2 = np.divide(5.0 * tp, denom, out=np.zeros_like(tp, dtype=np.float64), where=denom > 0)
+    prec = np.divide(tp, tp + fp, out=np.zeros_like(tp, dtype=np.float64), where=(tp + fp) > 0)
+    rec = np.divide(tp, tp + fn, out=np.zeros_like(tp, dtype=np.float64), where=(tp + fn) > 0)
 
     best_idx = int(np.argmax(f2))
     return {
@@ -367,6 +368,35 @@ def evaluate_walk_forward_predictions(
             "brier_score": brier,
         })
 
+    # Додаємо прямий рядок порівняння «LogReg Static проти LGBM WF» (LGBM WF Rolling 12m − LogReg Static)
+    m_lgb_wf = "LightGBM (Set C) [WF Rolling 12m]"
+    m_lr_stat = "LogReg (Set C) [Static Initial Train]"
+    row_lgb_wf = next(r for r in rows if r["model"] == m_lgb_wf)
+    row_lr_stat = next(r for r in rows if r["model"] == m_lr_stat)
+    diff_pr_lgb_wf_lr_stat = boot_pr[m_lgb_wf] - boot_pr[m_lr_stat]
+    diff_f2_lgb_wf_lr_stat = boot_f2[m_lgb_wf] - boot_f2[m_lr_stat]
+    d_pr_ci_lgb_lr = f"[{np.percentile(diff_pr_lgb_wf_lr_stat, 2.5):+.4f}, {np.percentile(diff_pr_lgb_wf_lr_stat, 97.5):+.4f}]"
+    d_f2_ci_lgb_lr = f"[{np.percentile(diff_f2_lgb_wf_lr_stat, 2.5):+.4f}, {np.percentile(diff_f2_lgb_wf_lr_stat, 97.5):+.4f}]"
+
+    rows.append({
+        "model": "LogReg Static проти LGBM WF (Set C: LGBM_WF − LogReg_Static)",
+        "feature_set": "C (22 features)",
+        "protocol_status": "direct paired comparison (LGBM WF Rolling 12m − LogReg Static)",
+        "pooled_pr_auc": float(row_lgb_wf["pooled_pr_auc"] - row_lr_stat["pooled_pr_auc"]),
+        "pr_auc_ci_95": d_pr_ci_lgb_lr,
+        "mean_monthly_pr_auc": float(row_lgb_wf["mean_monthly_pr_auc"] - row_lr_stat["mean_monthly_pr_auc"]),
+        "delta_prauc_vs_adapt_wf": float(np.mean(diff_pr_lgb_wf_lr_stat)),
+        "delta_prauc_vs_adapt_wf_ci_95": d_pr_ci_lgb_lr,
+        "prec_at_adapt_recall": float(row_lgb_wf["prec_at_adapt_recall"] - row_lr_stat["prec_at_adapt_recall"]),
+        "precision": float(row_lgb_wf["precision"] - row_lr_stat["precision"]),
+        "recall": float(row_lgb_wf["recall"] - row_lr_stat["recall"]),
+        "f2_score": float(row_lgb_wf["f2_score"] - row_lr_stat["f2_score"]),
+        "f2_ci_95": d_f2_ci_lgb_lr,
+        "delta_f2_vs_adapt_wf": float(np.mean(diff_f2_lgb_wf_lr_stat)),
+        "delta_f2_vs_adapt_wf_ci_95": d_f2_ci_lgb_lr,
+        "brier_score": float(row_lgb_wf["brier_score"] - row_lr_stat["brier_score"]),
+    })
+
     df_res = pd.DataFrame(rows)
 
     # Пряме порівняння (WF - Adaptive) проти (Static - Adaptive) та (WF - Static)
@@ -376,6 +406,11 @@ def evaluate_walk_forward_predictions(
             "LightGBM Set C (Rolling 12m vs Static)",
             "LightGBM (Set C) [WF Rolling 12m]",
             "LightGBM (Set C) [Static Initial Train]",
+        ),
+        (
+            "LogReg Static проти LGBM WF (Set C: LGBM_WF − LogReg_Static)",
+            "LightGBM (Set C) [WF Rolling 12m]",
+            "LogReg (Set C) [Static Initial Train]",
         ),
         (
             "LightGBM Set C (Expanding vs Static)",
@@ -447,7 +482,7 @@ def run_walk_forward_for_dataset(
     df["date_kyiv"] = kyiv_dt.dt.date
     df["year_month_utc"] = df["timestamp_utc"].dt.strftime("%Y-%m")
 
-    # 1. Статичні еталонні моделі (використовуємо ті самі заморожені файли моделей та порогів з основного звіту)
+    # 1. Статичні еталонні моделі (для Volunteer використовуємо заморожену модель із naive_fixed_D)
     import joblib
     init_train = df[df["split_set"] == "train"]
     init_val = df[df["split_set"] == "val"]
@@ -455,8 +490,8 @@ def run_walk_forward_for_dataset(
     y_init_va = init_val["target_onset_next_1h"].values
 
     if file_prefix == "volunteer":
-        frozen_lgb_path = PROJECT_ROOT / "models" / "volunteer_lightgbm_adaptive.joblib"
-        frozen_th_path = PROJECT_ROOT / "models" / "volunteer_optimal_thresholds.json"
+        frozen_lgb_path = PROJECT_ROOT / "models" / "volunteer_lightgbm_adaptive_fixed_d.joblib"
+        frozen_th_path = PROJECT_ROOT / "models" / "volunteer_optimal_thresholds_fixed_d.json"
     else:
         frozen_lgb_path = PROJECT_ROOT / "models" / "lightgbm_adaptive.joblib"
         frozen_th_path = PROJECT_ROOT / "models" / "optimal_thresholds.json"
@@ -606,6 +641,7 @@ def run_walk_forward_for_dataset(
 
         oof_chunks.append(pd.DataFrame({
             "timestamp_utc": te_df["timestamp_utc"].values,
+            "oblast": te_df["oblast"].values,
             "date_kyiv": te_df["date_kyiv"].values,
             "year_month_utc": te_df["year_month_utc"].values,
             "y_true": y_te,
@@ -646,13 +682,22 @@ def run_walk_forward_for_dataset(
     monthly_df = pd.DataFrame(monthly_diag_rows)
     oof_df = pd.concat(oof_chunks, ignore_index=True)
 
+    stat_lgb_status = (
+        f"reference static model (Val winner, frozen {frozen_lgb_path.name})"
+    )
+    stat_lr_status = (
+        "reference static model (frozen logreg_adaptive.joblib)"
+        if file_prefix != "volunteer"
+        else "reference static model (trained on naive_fixed_D Initial Train)"
+    )
+
     model_meta = [
         ("Reference: Predict-All (p* = 0.0)", "None", "reference (base-rate F2 floor)"),
         ("Baseline 3: Adaptive 14-day (Static Val p*)", "None", "reference baseline (frozen Val p*)"),
         ("Baseline 3: Adaptive 14-day (WF p*_M)", "None", "PRIMARY FAIR BASELINE (WF p*_M)"),
-        ("LightGBM (Set C) [Static Initial Train]", "C (22 features)", "reference static model (Val winner)"),
-        ("LogReg (Set C) [Static Initial Train]", "C (22 features)", "reference static model"),
-        ("LightGBM (Set C) [WF Rolling 12m]", "C (22 features)", "PRIMARY PRE-SPECIFIED HYPOTHESIS"),
+        ("LightGBM (Set C) [Static Initial Train]", "C (22 features)", stat_lgb_status),
+        ("LogReg (Set C) [Static Initial Train]", "C (22 features)", stat_lr_status),
+        ("LightGBM (Set C) [WF Rolling 12m]", "C (22 features)", "primary hypothesis of the WF block (specified after viewing static Test results)"),
         ("LogReg (Set C) [WF Rolling 12m]", "C (22 features)", "exploratory (pre-specified Set C)"),
         ("LightGBM (Set D: +Rel Ratios) [WF Rolling 12m, post-hoc]", "D (25 features, post-hoc)", "post-hoc exploratory (Set D)"),
         ("LogReg (Set D: +Rel Ratios) [WF Rolling 12m, post-hoc]", "D (25 features, post-hoc)", "post-hoc exploratory (Set D)"),
@@ -726,12 +771,26 @@ def run_walk_forward_for_dataset(
 
     elapsed_sec = round(time.perf_counter() - t0, 2)
 
-    # Збереження артефактів
+    # Збереження артефактів та Out-of-Fold прогнозів
     p_fx = f"{file_prefix}_" if file_prefix else ""
     monthly_csv = out_dir / f"{p_fx}walk_forward_monthly_metrics.csv"
     full_csv = out_dir / f"{p_fx}walk_forward_overall_benchmark.csv"
     rec_csv = out_dir / f"{p_fx}walk_forward_recent_60d_benchmark.csv"
     details_json = out_dir / f"{p_fx}walk_forward_details.json"
+
+    oof_suffix = "volunteer_fixed_d" if file_prefix == "volunteer" else "official"
+    oof_parquet_path = PROJECT_ROOT / "data" / "processed" / f"walk_forward_oof_predictions_{oof_suffix}.parquet"
+    oof_save_df = pd.DataFrame({
+        "timestamp_utc": pd.to_datetime(oof_df["timestamp_utc"], utc=True),
+        "oblast": oof_df["oblast"].astype(str),
+        "y": oof_df["y_true"].astype(np.int8),
+        "p_adapt": oof_df["p_adapt"].astype(np.float64),
+        "p_stat_lgb_c": oof_df["p_stat_lgb_c"].astype(np.float64),
+        "p_roll_lgb_c": oof_df["p_roll_lgb_c"].astype(np.float64),
+    })
+    oof_save_df.to_parquet(oof_parquet_path, index=False)
+    oof_sha256 = hashlib.sha256(oof_parquet_path.read_bytes()).hexdigest()
+    print(f"💾 [{dataset_name}] Збережено OOF прогнози: {oof_parquet_path.relative_to(PROJECT_ROOT)} (SHA-256: {oof_sha256[:16]}...)")
 
     monthly_df.to_csv(monthly_csv, index=False)
     df_full_res.to_csv(full_csv, index=False)
@@ -740,12 +799,50 @@ def run_walk_forward_for_dataset(
     details = {
         "dataset": dataset_name,
         "parquet_path": str(parquet_path.relative_to(PROJECT_ROOT)),
+        "static_lgb_model_artifact": f"models/{frozen_lgb_path.name}",
+        "static_thresholds_artifact": f"models/{frozen_th_path.name}",
+        "oof_predictions_parquet_path": str(oof_parquet_path.relative_to(PROJECT_ROOT)),
+        "oof_predictions_sha256": oof_sha256,
         "target_interval_definition": "[T, T+1h)",
         "embargo_hours": 2,
         "primary_hypothesis": {
             "model": "LightGBM (Set C) [WF Rolling 12m]",
+            "protocol_status": "primary hypothesis of the WF block (specified after viewing static Test results)",
             "comparator": "Baseline 3: Adaptive 14-day (WF p*_M)",
             "metric": "Paired Delta PR-AUC (Day-Block Bootstrap N=500, seed=42)",
+        },
+        "methodological_notes": {
+            "hyperparameter_alignment_history": (
+                "У першому (докомітному) прогоні Walk-Forward функція fit_fold_lightgbm мала відмінні від train_models.py "
+                "гіперпараметри (n_estimators=600, learning_rate=0.04, num_leaves=31, max_depth=6, min_child_samples=120, "
+                "class_weight='balanced', eval_metric='average_precision'), а Static LightGBM перенавчався ними ж замість "
+                "завантаження замороженого .joblib. Тоді на Volunteer LightGBM (Set C) [WF Rolling 12m] мав на повному Test "
+                "pooled_pr_auc = 0.3935 [0.385, 0.401] та delta_prauc_vs_adapt_wf = +0.0012 [-0.0040, +0.0067] (статистичний паритет "
+                "із Adaptive 14-day = 0.3924 [0.384, 0.400], тобто відсутність значущого приросту на повному Test), на останніх 60 днях — "
+                "pooled_pr_auc = 0.4933 [0.480, 0.509] та delta_prauc_vs_adapt_wf = +0.0125 [+0.0042, +0.0215], а Static LightGBM мав "
+                "pooled_pr_auc = 0.3684 [0.360, 0.377] (delta_prauc_vs_adapt_wf = -0.0239 [-0.0285, -0.0194]) на повному Test та "
+                "0.4261 [0.415, 0.440] (delta_prauc_vs_adapt_wf = -0.0548 [-0.0641, -0.0449]) на останніх 60 днях. "
+                "Після суворого вирівнювання fit_fold_lightgbm до параметрів train_models.py (n_estimators=300, learning_rate=0.05, "
+                "num_leaves=31, max_depth=-1, min_child_samples=50, без class_weight='balanced', зі стандартним binary_logloss early stopping) "
+                "та переходу Static на заморожений volunteer_lightgbm_adaptive_fixed_d.joblib висновок на Volunteer змінився: "
+                "на повному Test (volunteer_walk_forward_overall_benchmark.csv) для LightGBM (Set C) [WF Rolling 12m] "
+                "pooled_pr_auc зріс до 0.4050468889682864 (0.4050 [0.397, 0.413]), а delta_prauc_vs_adapt_wf став статистично значущим: "
+                "+0.01277323959789397 (+0.0128 [+0.0082, +0.0168]); для LightGBM (Set C) [Static Initial Train] (fixed_d) "
+                "pooled_pr_auc становить 0.390230721659669 (0.3902 [0.383, 0.397]), delta_prauc_vs_adapt_wf = -0.0019152044766016757 "
+                "(-0.0019 [-0.0065, +0.0024]). На останніх 60 днях (volunteer_walk_forward_recent_60d_benchmark.csv) для "
+                "LightGBM (Set C) [WF Rolling 12m] pooled_pr_auc зріс до 0.49750844169332 (0.4975 [0.486, 0.512]), "
+                "delta_prauc_vs_adapt_wf = +0.016718345170182388 (+0.0167 [+0.0089, +0.0252]), а для Static Initial Train (fixed_d) "
+                "pooled_pr_auc становить 0.4546067304670379 (0.4546 [0.440, 0.472]), delta_prauc_vs_adapt_wf = -0.02624850710058918 "
+                "(-0.0262 [-0.0360, -0.0156]). Водночас за PR-AUC на Volunteer LightGBM WF Rolling 12m (0.4050) поступається "
+                "LogReg (Set C) [Static Initial Train] (0.40973998394841066, [0.401, 0.418], парна різниця LGBM_WF − LogReg_Static = "
+                "-0.004641689962824445 [-0.0081, -0.0013]) і перебуває на рівні LogReg (Set C) [WF Rolling 12m] (0.4057240668278464, [0.397, 0.414]). "
+                "Примітка: згадані в попередніх чернетках числа 0.4094 та 0.4793 (Δ = −0.0017) були взяті з пам'яті і не підтверджені жодним CSV чи логом прогонів."
+            ),
+            "causal_interpretation_caveat": (
+                "Спостережуваний приріст Walk-Forward над статичним LightGBM узгоджується з гіпотезою про адаптацію "
+                "до зміни режиму з червня 2025 року та зняттям насичення діапазону розбиттів дерев наприкінці 2026 року "
+                "(окремий каузальний інтервенційний тест причини не проводився)."
+            ),
         },
         "measured_runtime_seconds": elapsed_sec,
         "n_test_months": len(test_months),

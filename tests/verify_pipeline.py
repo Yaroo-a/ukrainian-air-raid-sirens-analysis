@@ -3,10 +3,10 @@
 ВАЖЛИВО: Цей скрипт НЕ є перевіркою відтворюваності числових результатів з нуля (для повного відтворення
 використовуйте `bash run_all.sh`). Він перевіряє лише:
 1. Наявність та кількість рядків у Parquet-файлах (основного та волонтерського датасетів).
-2. Наявність і розмір (> 20 KB) усіх 31 графіків:
+2. Наявність і розмір (> 20 KB) усіх 33 графіків:
    - 13 у reports/official/figures/
    - 13 у reports/volunteer/figures/
-   - 5 порівняльних у reports/comparison/figures/
+   - 7 порівняльних у reports/comparison/figures/
 3. Наявність і непорожність усіх CSV/JSON-звітів у reports/official/, reports/volunteer/ та reports/comparison/.
 4. Синтаксичну валідність JSON-структури всіх 5 Jupyter Notebooks (наявність масиву cells).
 """
@@ -90,6 +90,7 @@ def verify_pipeline():
         "17_comparison_alert_counts_and_durations.png",
         "18_volunteer_naive_sensitivity_comparison.png",
         "19_walk_forward_vs_static_comparison.png",
+        "20_walk_forward_regional_breakdown.png",
     ]
     for fig_name in expected_comp_figures:
         fig_path = comp_dir / "figures" / fig_name
@@ -115,12 +116,14 @@ def verify_pipeline():
         (off_dir / "ml_recent_60d_benchmark.csv", 11),
         (off_dir / "feature_importance_lightgbm.csv", 22),
         (off_dir / "walk_forward_monthly_metrics.csv", 16),
-        (off_dir / "walk_forward_overall_benchmark.csv", 13),
-        (off_dir / "walk_forward_recent_60d_benchmark.csv", 13),
+        (off_dir / "walk_forward_overall_benchmark.csv", 14),
+        (off_dir / "walk_forward_recent_60d_benchmark.csv", 14),
+        (off_dir / "walk_forward_regional_breakdown.csv", 24),
         # Volunteer
         (vol_dir / "volunteer_train_median_durations.csv", 24),
         (vol_dir / "regional_clusters_summary.csv", 24),
         (vol_dir / "volunteer_clusters_train_only.csv", 24),
+        (vol_dir / "volunteer_clusters_train_only_fixed_d.csv", 24),
         (vol_dir / "spatial_lead_lag_summary.csv", 49),
         (vol_dir / "baselines_benchmark.csv", 3),
         (vol_dir / "volunteer_feature_shift_summary.csv", 10),
@@ -133,13 +136,16 @@ def verify_pipeline():
         (vol_dir / "volunteer_feature_importance_lightgbm.csv", 22),
         (vol_dir / "volunteer_naive_sensitivity.csv", 6),
         (vol_dir / "volunteer_walk_forward_monthly_metrics.csv", 17),
-        (vol_dir / "volunteer_walk_forward_overall_benchmark.csv", 13),
-        (vol_dir / "volunteer_walk_forward_recent_60d_benchmark.csv", 13),
+        (vol_dir / "volunteer_walk_forward_overall_benchmark.csv", 14),
+        (vol_dir / "volunteer_walk_forward_recent_60d_benchmark.csv", 14),
+        (vol_dir / "volunteer_walk_forward_regional_breakdown.csv", 24),
         # Comparison
         (comp_dir / "official_vs_volunteer_comparison.csv", 5),
         (comp_dir / "official_vs_volunteer_ml_metrics_comparison.csv", 55),
         (comp_dir / "official_vs_volunteer_feature_shift_comparison.csv", 10),
-        (comp_dir / "official_vs_volunteer_walk_forward_comparison.csv", 26),
+        (comp_dir / "official_vs_volunteer_walk_forward_comparison.csv", 28),
+        (comp_dir / "official_vs_volunteer_walk_forward_regional.csv", 24),
+        (comp_dir / "official_vs_volunteer_walk_forward_regional_clusters.csv", 6),
     ]
     for csv_path, min_rows in expected_csvs:
         rel = csv_path.relative_to(project_root)

@@ -1,14 +1,23 @@
 {
   "dataset": "Volunteer (naive_fixed_D)",
   "parquet_path": "data/processed/volunteer_ml_features_hourly_fixed_d.parquet",
+  "static_lgb_model_artifact": "models/volunteer_lightgbm_adaptive_fixed_d.joblib",
+  "static_thresholds_artifact": "models/volunteer_optimal_thresholds_fixed_d.json",
+  "oof_predictions_parquet_path": "data/processed/walk_forward_oof_predictions_volunteer_fixed_d.parquet",
+  "oof_predictions_sha256": "b7844159e0dbcfc4aab7811a5ac0e341b223e8dd773f967681a2f5efee6524d7",
   "target_interval_definition": "[T, T+1h)",
   "embargo_hours": 2,
   "primary_hypothesis": {
     "model": "LightGBM (Set C) [WF Rolling 12m]",
+    "protocol_status": "primary hypothesis of the WF block (specified after viewing static Test results)",
     "comparator": "Baseline 3: Adaptive 14-day (WF p*_M)",
     "metric": "Paired Delta PR-AUC (Day-Block Bootstrap N=500, seed=42)"
   },
-  "measured_runtime_seconds": 496.59,
+  "methodological_notes": {
+    "hyperparameter_alignment_history": "У першому (докомітному) прогоні Walk-Forward функція fit_fold_lightgbm мала відмінні від train_models.py гіперпараметри (n_estimators=600, learning_rate=0.04, num_leaves=31, max_depth=6, min_child_samples=120, class_weight='balanced', eval_metric='average_precision'), а Static LightGBM перенавчався ними ж замість завантаження замороженого .joblib. Тоді на Volunteer LightGBM (Set C) [WF Rolling 12m] мав на повному Test pooled_pr_auc = 0.3935 [0.385, 0.401] та delta_prauc_vs_adapt_wf = +0.0012 [-0.0040, +0.0067] (статистичний паритет із Adaptive 14-day = 0.3924 [0.384, 0.400], тобто відсутність значущого приросту на повному Test), на останніх 60 днях — pooled_pr_auc = 0.4933 [0.480, 0.509] та delta_prauc_vs_adapt_wf = +0.0125 [+0.0042, +0.0215], а Static LightGBM мав pooled_pr_auc = 0.3684 [0.360, 0.377] (delta_prauc_vs_adapt_wf = -0.0239 [-0.0285, -0.0194]) на повному Test та 0.4261 [0.415, 0.440] (delta_prauc_vs_adapt_wf = -0.0548 [-0.0641, -0.0449]) на останніх 60 днях. Після суворого вирівнювання fit_fold_lightgbm до параметрів train_models.py (n_estimators=300, learning_rate=0.05, num_leaves=31, max_depth=-1, min_child_samples=50, без class_weight='balanced', зі стандартним binary_logloss early stopping) та переходу Static на заморожений volunteer_lightgbm_adaptive_fixed_d.joblib висновок на Volunteer змінився: на повному Test (volunteer_walk_forward_overall_benchmark.csv) для LightGBM (Set C) [WF Rolling 12m] pooled_pr_auc зріс до 0.4050468889682864 (0.4050 [0.397, 0.413]), а delta_prauc_vs_adapt_wf став статистично значущим: +0.01277323959789397 (+0.0128 [+0.0082, +0.0168]); для LightGBM (Set C) [Static Initial Train] (fixed_d) pooled_pr_auc становить 0.390230721659669 (0.3902 [0.383, 0.397]), delta_prauc_vs_adapt_wf = -0.0019152044766016757 (-0.0019 [-0.0065, +0.0024]). На останніх 60 днях (volunteer_walk_forward_recent_60d_benchmark.csv) для LightGBM (Set C) [WF Rolling 12m] pooled_pr_auc зріс до 0.49750844169332 (0.4975 [0.486, 0.512]), delta_prauc_vs_adapt_wf = +0.016718345170182388 (+0.0167 [+0.0089, +0.0252]), а для Static Initial Train (fixed_d) pooled_pr_auc становить 0.4546067304670379 (0.4546 [0.440, 0.472]), delta_prauc_vs_adapt_wf = -0.02624850710058918 (-0.0262 [-0.0360, -0.0156]). Водночас за PR-AUC на Volunteer LightGBM WF Rolling 12m (0.4050) поступається LogReg (Set C) [Static Initial Train] (0.40973998394841066, [0.401, 0.418], парна різниця LGBM_WF − LogReg_Static = -0.004641689962824445 [-0.0081, -0.0013]) і перебуває на рівні LogReg (Set C) [WF Rolling 12m] (0.4057240668278464, [0.397, 0.414]). Примітка: згадані в попередніх чернетках числа 0.4094 та 0.4793 (Δ = −0.0017) були взяті з пам'яті і не підтверджені жодним CSV чи логом прогонів.",
+    "causal_interpretation_caveat": "Спостережуваний приріст Walk-Forward над статичним LightGBM узгоджується з гіпотезою про адаптацію до зміни режиму з червня 2025 року та зняттям насичення діапазону розбиттів дерев наприкінці 2026 року (окремий каузальний інтервенційний тест причини не проводився)."
+  },
+  "measured_runtime_seconds": 541.37,
   "n_test_months": 17,
   "test_months": [
     "2025-06",
@@ -44,30 +53,64 @@
         0.008178909443727827,
         0.016777856793096468
       ],
-      "ref_minus_adapt_prauc_mean": -0.004045377405064577,
+      "ref_minus_adapt_prauc_mean": -0.0019152044766016757,
       "ref_minus_adapt_prauc_ci_95": [
-        -0.008514015914740115,
-        0.0003715528335109804
+        -0.006482804370918573,
+        0.002370131198396668
       ],
-      "wf_minus_ref_prauc_mean": 0.016818617002958548,
+      "wf_minus_ref_prauc_mean": 0.014688444074495646,
       "wf_minus_ref_prauc_ci_95": [
-        0.01303979593608744,
-        0.020210021906640445
+        0.010979209348938939,
+        0.017958144846637172
       ],
       "wf_minus_adapt_f2_mean": 0.008724014112064344,
       "wf_minus_adapt_f2_ci_95": [
         0.006139720317583972,
         0.011010490295014766
       ],
-      "ref_minus_adapt_f2_mean": 0.005222679743551382,
+      "ref_minus_adapt_f2_mean": 0.005839657891977098,
       "ref_minus_adapt_f2_ci_95": [
-        0.0025771116494052145,
-        0.008185733245500919
+        0.0030400775335403057,
+        0.008585181648654652
       ],
-      "wf_minus_ref_f2_mean": 0.003501334368512963,
+      "wf_minus_ref_f2_mean": 0.0028843562200872464,
       "wf_minus_ref_f2_ci_95": [
-        0.0016177979048273645,
-        0.005344455603432326
+        0.0011607934685299026,
+        0.00480346542259474
+      ]
+    },
+    "LogReg Static проти LGBM WF (Set C: LGBM_WF − LogReg_Static)": {
+      "wf_model": "LightGBM (Set C) [WF Rolling 12m]",
+      "reference_model": "LogReg (Set C) [Static Initial Train]",
+      "wf_minus_adapt_prauc_mean": 0.01277323959789397,
+      "wf_minus_adapt_prauc_ci_95": [
+        0.008178909443727827,
+        0.016777856793096468
+      ],
+      "ref_minus_adapt_prauc_mean": 0.017414929560718412,
+      "ref_minus_adapt_prauc_ci_95": [
+        0.014982058457305752,
+        0.019988858790470864
+      ],
+      "wf_minus_ref_prauc_mean": -0.004641689962824445,
+      "wf_minus_ref_prauc_ci_95": [
+        -0.008107135139692977,
+        -0.0012893117819609864
+      ],
+      "wf_minus_adapt_f2_mean": 0.008724014112064344,
+      "wf_minus_adapt_f2_ci_95": [
+        0.006139720317583972,
+        0.011010490295014766
+      ],
+      "ref_minus_adapt_f2_mean": 0.0023133178233509443,
+      "ref_minus_adapt_f2_ci_95": [
+        -5.0919731519841126e-05,
+        0.005088734493710153
+      ],
+      "wf_minus_ref_f2_mean": 0.0064106962887134,
+      "wf_minus_ref_f2_ci_95": [
+        0.004377672536374291,
+        0.008341544369721166
       ]
     },
     "LightGBM Set C (Expanding vs Static)": {
@@ -78,30 +121,30 @@
         0.011709797548342955,
         0.019546748065398394
       ],
-      "ref_minus_adapt_prauc_mean": -0.004045377405064577,
+      "ref_minus_adapt_prauc_mean": -0.0019152044766016757,
       "ref_minus_adapt_prauc_ci_95": [
-        -0.008514015914740115,
-        0.0003715528335109804
+        -0.006482804370918573,
+        0.002370131198396668
       ],
-      "wf_minus_ref_prauc_mean": 0.01953982531527982,
+      "wf_minus_ref_prauc_mean": 0.01740965238681692,
       "wf_minus_ref_prauc_ci_95": [
-        0.01641928348119439,
-        0.022288330554961804
+        0.014301080746864852,
+        0.0203643316087798
       ],
       "wf_minus_adapt_f2_mean": 0.00883999320756175,
       "wf_minus_adapt_f2_ci_95": [
         0.006163923814049043,
         0.011297535906287327
       ],
-      "ref_minus_adapt_f2_mean": 0.005222679743551382,
+      "ref_minus_adapt_f2_mean": 0.005839657891977098,
       "ref_minus_adapt_f2_ci_95": [
-        0.0025771116494052145,
-        0.008185733245500919
+        0.0030400775335403057,
+        0.008585181648654652
       ],
-      "wf_minus_ref_f2_mean": 0.003617313464010368,
+      "wf_minus_ref_f2_mean": 0.003000335315584652,
       "wf_minus_ref_f2_ci_95": [
-        0.0020934199005057997,
-        0.005319937649876234
+        0.001548476880837743,
+        0.004517028352048551
       ]
     },
     "LogReg Set C (Rolling 12m vs Static)": {
@@ -216,30 +259,64 @@
         0.008857069061003328,
         0.02515246692357733
       ],
-      "ref_minus_adapt_prauc_mean": -0.028968741164134972,
+      "ref_minus_adapt_prauc_mean": -0.02624850710058918,
       "ref_minus_adapt_prauc_ci_95": [
-        -0.039041368700429686,
-        -0.01816088627296981
+        -0.03602401222546594,
+        -0.015577959317888109
       ],
-      "wf_minus_ref_prauc_mean": 0.04568708633431735,
+      "wf_minus_ref_prauc_mean": 0.042966852270771565,
       "wf_minus_ref_prauc_ci_95": [
-        0.035887096921883584,
-        0.05523688611365042
+        0.03313548229020798,
+        0.0519642373823275
       ],
       "wf_minus_adapt_f2_mean": 0.0028688802010645186,
       "wf_minus_adapt_f2_ci_95": [
         -0.0001349591750860801,
         0.006036979047829731
       ],
-      "ref_minus_adapt_f2_mean": 0.0014398718562265984,
+      "ref_minus_adapt_f2_mean": 0.0017885548113046336,
       "ref_minus_adapt_f2_ci_95": [
-        -0.0021076452768036655,
-        0.005169213671593096
+        -0.0018371545105495407,
+        0.005493670710633748
       ],
-      "wf_minus_ref_f2_mean": 0.0014290083448379202,
+      "wf_minus_ref_f2_mean": 0.001080325389759885,
       "wf_minus_ref_f2_ci_95": [
-        -0.0018944023290756284,
-        0.004913631329857174
+        -0.002443141929000597,
+        0.005115897763874093
+      ]
+    },
+    "LogReg Static проти LGBM WF (Set C: LGBM_WF − LogReg_Static)": {
+      "wf_model": "LightGBM (Set C) [WF Rolling 12m]",
+      "reference_model": "LogReg (Set C) [Static Initial Train]",
+      "wf_minus_adapt_prauc_mean": 0.016718345170182388,
+      "wf_minus_adapt_prauc_ci_95": [
+        0.008857069061003328,
+        0.02515246692357733
+      ],
+      "ref_minus_adapt_prauc_mean": 0.019409784545818796,
+      "ref_minus_adapt_prauc_ci_95": [
+        0.013280780262911712,
+        0.025720799807666894
+      ],
+      "wf_minus_ref_prauc_mean": -0.0026914393756364064,
+      "wf_minus_ref_prauc_ci_95": [
+        -0.007289253625286651,
+        0.002843456423372676
+      ],
+      "wf_minus_adapt_f2_mean": 0.0028688802010645186,
+      "wf_minus_adapt_f2_ci_95": [
+        -0.0001349591750860801,
+        0.006036979047829731
+      ],
+      "ref_minus_adapt_f2_mean": -0.0020306406056142434,
+      "ref_minus_adapt_f2_ci_95": [
+        -0.006756170526398289,
+        0.0024582734673087936
+      ],
+      "wf_minus_ref_f2_mean": 0.004899520806678762,
+      "wf_minus_ref_f2_ci_95": [
+        0.0006110194689435551,
+        0.009743687844640407
       ]
     },
     "LightGBM Set C (Expanding vs Static)": {
@@ -250,30 +327,30 @@
         0.009219465411667774,
         0.025197905047626926
       ],
-      "ref_minus_adapt_prauc_mean": -0.028968741164134972,
+      "ref_minus_adapt_prauc_mean": -0.02624850710058918,
       "ref_minus_adapt_prauc_ci_95": [
-        -0.039041368700429686,
-        -0.01816088627296981
+        -0.03602401222546594,
+        -0.015577959317888109
       ],
-      "wf_minus_ref_prauc_mean": 0.046049121105588856,
+      "wf_minus_ref_prauc_mean": 0.04332888704204307,
       "wf_minus_ref_prauc_ci_95": [
-        0.03738768729697871,
-        0.05518510042957634
+        0.03512786622926943,
+        0.05197273234553236
       ],
       "wf_minus_adapt_f2_mean": 0.0032043724942745753,
       "wf_minus_adapt_f2_ci_95": [
         0.00014159648764096314,
         0.006572465834131191
       ],
-      "ref_minus_adapt_f2_mean": 0.0014398718562265984,
+      "ref_minus_adapt_f2_mean": 0.0017885548113046336,
       "ref_minus_adapt_f2_ci_95": [
-        -0.0021076452768036655,
-        0.005169213671593096
+        -0.0018371545105495407,
+        0.005493670710633748
       ],
-      "wf_minus_ref_f2_mean": 0.001764500638047977,
+      "wf_minus_ref_f2_mean": 0.0014158176829699419,
       "wf_minus_ref_f2_ci_95": [
-        -0.001027769014380736,
-        0.004994437186484185
+        -0.001713776143184284,
+        0.004717715425276788
       ]
     },
     "LogReg Set C (Rolling 12m vs Static)": {
