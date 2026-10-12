@@ -4,7 +4,7 @@
 
 [![Python 3.14](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Data](https://img.shields.io/badge/Datasets-Official%20299k%20%7C%20Volunteer%20709k-red.svg)](https://github.com/Vadimkin/ukrainian-air-raid-sirens-dataset)
+[![Data](https://img.shields.io/badge/Datasets-Official%20299k%20%7C%20Volunteer%20116k-red.svg)](https://github.com/Vadimkin/ukrainian-air-raid-sirens-dataset)
 [![Storage](https://img.shields.io/badge/Storage-Apache%20Parquet-green.svg)](https://parquet.apache.org/)
 [![ML](https://img.shields.io/badge/Models-Static%20%26%20Walk--Forward%20ML-orange.svg)](reports/comparison/official_vs_volunteer_walk_forward_comparison.csv)
 
@@ -15,18 +15,18 @@ A research and engineering study analyzing the spatio-temporal dynamics of air r
 ## ⚡ Executive Summary (Key Research Findings)
 
 1. **Stage 1 — Robust Spatio-Temporal Structure Across Two Independent Sources (RQ1–RQ3):**
-   * **Temporal Cyclicity (RQ1):** Statistically significant weekly cyclicity is confirmed on both datasets (Kruskal-Wallis $H = 25.52, \ p = 2.74 \times 10^{-4}$ on Official; $H = 21.66, \ p = 0.0014$ on Volunteer), peaking Wednesday–Friday and reaching a minimum on Sunday, alongside a stable share of nocturnal alert onsets (`00:00–05:59 Europe/Kyiv`: **$20.2\% – 24.0\%$** across years).
-   * **Regional Clustering (RQ2):** Isolated clustering fitted strictly on `Train <= 2024-04-30` for ML features (`low_activity`, `medium_activity`, `high_activity`) shows strong cross-source consistency, while full-period descriptive clustering cleanly separates 3 geographic belts (Deep Rear, Transit Center & South, Frontline/Border Zone).
-   * **Spatial Propagation Corridors (RQ3):** Cross-correlations on a 10-minute discrete grid across 49 contiguous oblast pairs exhibit high cross-source reproducibility ($\rho_{\text{Spearman}} = 0.960$ between Official and Volunteer), capturing consistent 10–20 minute directional lead-lag couplings along southern, eastern, and central corridors.
-2. **Stage 2 (Block A) — Static ML Forecasting & Diagnosing the 5x Covariate Shift:**
+   * **Temporal Cyclicity (RQ1):** Statistically significant weekly cyclicity is confirmed on both datasets (Kruskal-Wallis $H = 25.52, \ p = 2.74 \times 10^{-4}$ on Official; $H = 17.05, \ p = 0.0091$ on Volunteer, with 3 statistically significant day pairs each after Bonferroni correction $\alpha_{\text{adj}} = 0.00238$), peaking Wednesday–Friday and reaching a minimum on Sunday, alongside a stable share of nocturnal alert onsets (`00:00–05:59 Europe/Kyiv`: **$20.2\% – 24.0\%$** across years on Official and **$21.0\% – 26.4\%$** on Volunteer).
+   * **Regional Clustering (RQ2):** Isolated clustering fitted strictly on `Train <= 2024-04-30` for ML features (`low_activity`, `medium_activity`, `high_activity`: `7 / 5 / 12` split on Official and `7 / 7 / 10` on Volunteer) shows strong cross-source consistency, while full-period descriptive clustering cleanly separates 3 geographic belts (Deep Rear, Transit Center & North, Frontline/Border Zone).
+   * **Spatial Propagation Corridors (RQ3):** Cross-correlations on a 10-minute discrete grid across 49 contiguous oblast pairs exhibit high cross-source agreement in joint active intervals ($\rho_{\text{Spearman}} = 0.965, \ p = 4.68 \times 10^{-29}$) and peak cross-correlations ($\rho_{\text{Spearman}} = 0.411, \ p = 0.0033$), capturing consistent 10–20 minute directional lead-lag couplings along southern, eastern, and central corridors.
+2. **Stage 2 (Block A) — Static ML Forecasting & Diagnosing Covariate Shift:**
    * Under the formal pre-specified selection rule ($\arg\max \text{PR-AUC}$ on Validation `2024-05-01` – `2025-05-31`), **`LightGBM (Set C: Spatial + Adaptive, 22 features)`** won among all pre-specified candidates (`Baselines 1–3`, `LogReg A/B/C`, `LightGBM A/B/C`) on both Official (`Val PR-AUC = 0.3012`) and Volunteer (`0.3107` on `naive_as_is` / `0.3116` on `naive_fixed_D`).
    * On the full Official Test set (`2025-06` – `2026-09`), frozen static `LightGBM (Set C)` significantly outperforms the `Adaptive 14-day Baseline` ($\Delta\text{PR-AUC} = +0.0297 \ [+0.0220, +0.0373]$, $\Delta F_2 = +0.0249 \ [+0.0189, +0.0304]$), yet trails the simpler post-hoc `Set B` configuration (13 features without historical/national aggregates: `PR-AUC = 0.3741` vs. `0.3329`).
-   * **Root Cause of Static `Set C` Degradation:** Between `Train` (`2022–04.2024`) and `Test` (`2025-06..2026`), the mean number of simultaneously active oblasts (`national_active_count`) increased **$4.73\times$** on Official (`1.17` $\to$ `5.55`) and **$4.95\times$** on the independent Volunteer dataset (`1.12` $\to$ `5.57`), which had no August 2025 logging reform. Static decision trees frozen on 2022–2024 data extrapolate with outdated split thresholds.
+   * **Root Cause of Static `Set C` Degradation:** Between `Train` (`2022–04.2024`) and `Test` (`2025-06..2026`), on Official the mean number of simultaneously active oblasts (`national_active_count`) increased **$4.73\times$** (`1.17` $\to$ `5.54`, and after the August 1, 2025 sub-regional logging transition from `3.17` to `5.95`) and `neighbors_active_count` increased **$4.04\times$** (`0.13` $\to$ `0.52`), whereas on the independent Volunteer dataset (which remained at oblast-level logging) `national_active_count` increased **$1.72\times$** (`1.26` $\to$ `2.17`), `adaptive_rate_14d` increased **$1.66\times$** (`0.084` $\to$ `0.140`), and `onsets_last_24h` increased **$1.70\times$** (`1.95` $\to$ `3.32`). Static decision trees frozen on 2022–2024 data extrapolate with outdated split thresholds.
 3. **Stage 2 (Block B) — Causal `naive` Sensitivity on Volunteer & Monthly Walk-Forward Retraining:**
    * Evaluating three strictly causal policies for handling the `naive` flag in Volunteer records (`naive_as_is`, `drop_naive`, and `naive_fixed_D` using median duration $D_{\text{oblast}}$ estimated strictly on `Train`) confirmed complete invariance of the static findings.
    * Transitioning to **monthly retraining (`LightGBM Set C [WF Rolling 12m]`, 12m Train + 2m Val with a 2-hour `embargo` buffer)** substantially improves gradient boosting performance:
-     * **Official:** Pooled `PR-AUC` rises from `0.3329` (Static) to **`0.4203 [0.409, 0.431]`** ($\Delta_{\text{vs Adapt}} = +0.1171 \ [+0.1081, +0.1261]$, $\Delta_{\text{WF − Static}} = +0.0873 \ [+0.0789, +0.0954]$, winning `16/16` months), and on the latest 60 days from `0.3809` to **`0.5139 [0.488, 0.541]`** ($\Delta_{\text{vs Adapt}} = +0.1450 \ [+0.1177, +0.1726]$). Moreover, full `Set C` under Walk-Forward decisively beats reduced `Set B` (`0.3914`) and `Set C'` (`0.3985`).
-     * **Volunteer (`naive_fixed_D`):** `LightGBM (Set C) [WF Rolling 12m]` statistically significantly outperforms `Adaptive 14-day` on both Full Test (`0.4050 [0.397, 0.413]` vs. `0.3924`, $\Delta_{\text{vs Adapt}} = +0.0128 \ [+0.0082, +0.0168]$, $\Delta_{\text{WF − Static}} = +0.0147 \ [+0.0110, +0.0180]$, winning `15/17` months) and the latest 60 days (`0.4975 [0.486, 0.512]` vs. `0.4810`, $\Delta_{\text{vs Adapt}} = +0.0167 \ [+0.0089, +0.0252]$).
+     * **Official:** Pooled `PR-AUC` rises from `0.3329` (Static) to **`0.4203 [0.409, 0.431]`** ($\Delta_{\text{vs Adapt}} = +0.1171 \ [+0.1081, +0.1261]$, $\Delta_{\text{WF − Static}} = +0.0873 \ [+0.0789, +0.0954]$, winning `16/16` months), and on the latest 60 days from `0.3809` to **`0.5139 [0.488, 0.541]`** ($\Delta_{\text{vs Adapt}} = +0.1450 \ [+0.1177, +0.1726]$).
+     * **Volunteer (`naive_fixed_D`):** `LightGBM (Set C) [WF Rolling 12m]` statistically significantly outperforms `Adaptive 14-day` on both Full Test (`0.4050 [0.397, 0.413]` vs. `0.3924`, $\Delta_{\text{vs Adapt}} = +0.0128 \ [+0.0082, +0.0168]$, $\Delta_{\text{WF − Static}} = +0.0147 \ [+0.0110, +0.0180]$, winning `15/17` months) and the latest 60 days (`0.4975 [0.486, 0.512]` vs. `0.4810`, $\Delta_{\text{vs Adapt}} = +0.0167 \ [+0.0089, +0.0252]$, $\Delta_{\text{WF − Static}} = +0.0430 \ [+0.0331, +0.0520]$).
      * **⚠️ Mandatory Caveat on Volunteer:** On the Volunteer dataset, `LightGBM (Set C) [WF Rolling 12m]` is **not unconditionally best across all metrics** — in `PR-AUC` ranking, it slightly trails the linear `LogReg (Set C) [Static Initial Train]` (`0.4050` vs. `0.4097` on Full Test, $\Delta = -0.0046 \ [-0.0081, -0.0013]$; `0.4975` vs. `0.5002` on the latest 60 days, $\Delta = -0.0027 \ [-0.0073, +0.0028]$), outperforming `LogReg Static` only on thresholded classification $F_2$-Score ($\Delta F_2 = +0.0064 \ [+0.0044, +0.0083]$) and probability calibration (`Brier = 0.1093` vs. `0.2645`).
 
 ---
@@ -45,19 +45,19 @@ A research and engineering study analyzing the spatio-temporal dynamics of air r
 
 ## 📦 1. Data Sources, Verification & Causal Cleaning
 
-Both raw datasets originate from the public repository [Vadimkin/ukrainian-air-raid-sirens-dataset](https://github.com/Vadimkin/ukrainian-air-raid-sirens-dataset) (download date: `2026-10-11`) and undergo cryptographic `SHA-256` verification, deduplication, and reconstruction of continuous oblast-level intervals `[started_at, finished_at]`.
+Both raw datasets originate from the public repository [Vadimkin/ukrainian-air-raid-sirens-dataset](https://github.com/Vadimkin/ukrainian-air-raid-sirens-dataset) (verification date: `2026-10-11`, [`reports/comparison/upstream_source_verification.json`](reports/comparison/upstream_source_verification.json)) and undergo cryptographic `SHA-256` verification, deduplication, and reconstruction of continuous oblast-level intervals `[started_at, finished_at]` in [`src/data/cleaner.py`](src/data/cleaner.py).
 
 ### Table 1.1. Comparative Data Passport & Cleaning Waterfall
 
 | Parameter / Processing Stage | Source 1: Official (`official_data_uk.csv`) | Source 2: Volunteer (`volunteer_data_uk.csv`) |
 | :--- | :--- | :--- |
-| **Raw File & SHA-256** | [`data/raw/official_data_uk.csv`](data/raw/official_data_uk.csv)<br>`1f50085481d229f57b624d83b1ce723e884dea409c14afb5b7040c8a2f233e4f` | [`data/raw/volunteer_data_uk.csv`](data/raw/volunteer_data_uk.csv)<br>`23c62fb83ca55dc9f0c2fb9eb2ebfd7fd9aa1ac33d3decf3d1ba1fcdfcbefebe` |
-| **Timestamp Span (UTC)** | `2022-03-15 16:10:34` – `2026-09-07 05:28:22` | `2022-03-15 06:45:03` – `2026-10-11 05:13:06` |
-| **Raw Row Count** | `299,275` rows (contains a duplicated upstream block) | `709,225` rows (contains the `naive` flag for missing end times) |
-| **Step 1: Exact Deduplication** | `-113,845` exact duplicates $\to$ **`185,430`** unique rows | Raw interval deduplication in [`volunteer_cleaner.py`](src/data/volunteer_cleaner.py) |
-| **Step 2: Micro-Glitch Filter ($< 60\text{ s}$)** | `-453` records (`duration < 60s` or $<0$) $\to$ **`184,977`** records | Filtering out records with `duration < 60s` or negative duration |
-| **Step 3: Level / `naive` Policy** | Pre-`2025-08-01`: `level == 'oblast'` only (`-12,188` sub-regional rows) $\to$ **`172,789`** records; from `2025-08-01`: union of `oblast/raion/hromada` | 3 causal policies for `naive == True`:<br>• `naive_as_is` (+30 min)<br>• `drop_naive` (drop rows)<br>• `naive_fixed_D` (median $D_{\text{oblast}}$ strictly from `Train <= 2024-04-30`) |
-| **Step 4: Overlapping Interval Merge** | Consolidates `-87,881` nested records $\to$ **`84,908`** intervals (`84,907` across 24 oblasts + `1` in Luhansk) | • `naive_as_is`: **`113,525`** intervals<br>• `drop_naive`: **`109,802`** intervals<br>• `naive_fixed_D`: **`112,729`** intervals |
+| **Raw File & SHA-256** | [`data/raw/official_data_uk.csv`](data/raw/official_data_uk.csv)<br>`1f50085481d229f57b624d83b1ce723e884dea409c14afb5b7040c8a2f233e4f` | [`data/raw/volunteer_data_uk.csv`](data/raw/volunteer_data_uk.csv)<br>`1ead8618b1f5eb8eda2fe4a14e5fefa773a14534aba21aae577e463189da783b` |
+| **Timestamp Span (UTC)** | `2022-03-15 16:10:34` – `2026-09-07 05:28:22` | Raw: `2022-02-25 16:36:22` – `2026-10-11 04:36:59`<br>From `2022-03-15`: `2022-03-15 00:05:01` – `2026-10-11 04:36:59` |
+| **Raw Row Count** | `299,275` rows (contains a duplicated upstream block) | `115,989` rows (`5,812` or `5.01%` carrying `naive == True`) |
+| **Step 1: Deduplication & Start Alignment** | `-113,845` exact duplicates $\to$ **`185,430`** unique rows | `0` exact duplicates; `-1,099` records prior to `2022-03-15 00:00 UTC` removed $\to$ **`114,890`** rows in [`cleaner.py`](src/data/cleaner.py) (`clean_volunteer_data()`) |
+| **Step 2: Micro-Glitch Filter ($< 60\text{ s}$)** | `-453` records (`duration < 60s` or $<0$) $\to$ **`184,977`** records | `-1,365` records (`duration < 60s`) $\to$ **`113,525`** records (`5,659` with `naive == True`) |
+| **Step 3: Level / `naive` Policy** | Pre-`2025-08-01`: `level == 'oblast'` only (`-12,188` sub-regional rows) $\to$ **`172,789`** records; from `2025-08-01`: union of `oblast/raion/hromada` | 3 causal policies for `naive == True`:<br>• `naive_as_is` (+30 min)<br>• `drop_naive` (drop `-5,659` rows)<br>• `naive_fixed_D` (median $D_{\text{oblast}}$ strictly from `Train <= 2024-04-30`) |
+| **Step 4: Overlapping Interval Merge** | Consolidates `-87,881` nested records $\to$ **`84,908`** intervals (`84,907` across 24 oblasts + `1` in Luhansk) | • `naive_as_is`: **`113,525`** intervals (`113,523` in 24 oblasts + `2` occupied)<br>• `drop_naive`: **`107,866`** intervals (`107,866` in 24 oblasts)<br>• `naive_fixed_D`: **`113,525`** intervals (`113,523` in 24 oblasts + `2` occupied) |
 | **Step 5: Hourly Feature Store (`is_active_T == 0`)** | [`data/processed/ml_features_hourly.parquet`](data/processed/ml_features_hourly.parquet):<br>**`797,428`** calm region-hours (`0` duplicates) | • `as_is`: **`871,505`** calm region-hours<br>• `drop_naive`: **`874,375`** calm region-hours<br>• `fixed_D`: **`870,938`** calm region-hours |
 
 ### Why Does the Official Test Table Have `197,083` Rows While the Slice From April 2025 Has `228,371`?
@@ -74,10 +74,10 @@ This distinction comes directly from the chronological split design and the Walk
 <details>
 <summary><b>🔍 Detailed Audit of the 3 Upstream Duplicate Blocks in Vadimkin (Official CSV) & Version History</b></summary>
 
-Direct inspection of `https://raw.githubusercontent.com/Vadimkin/ukrainian-air-raid-sirens-dataset/main/datasets/official_data_uk.csv` confirmed that the upstream file contains `299,275` rows (with an identical SHA-256 hash) and that the duplicated block is present directly in upstream:
+Direct inspection of `https://raw.githubusercontent.com/Vadimkin/ukrainian-air-raid-sirens-dataset/main/datasets/official_data_uk.csv` ([`src/data/verify_upstream_source.py`](src/data/verify_upstream_source.py), report [`reports/comparison/upstream_source_verification.json`](reports/comparison/upstream_source_verification.json)) confirmed that the upstream file contains `299,275` rows (with an identical SHA-256 hash) and that the duplicated block is present directly in upstream:
 * **Block 1 (rows `0..113,910`, `113,911` rows):** Spans `2022-03-15 16:10:34 UTC` – `2026-01-25 13:11:52 UTC` (`0` internal duplicates).
 * **Block 2 (rows `113,911..227,831`, `113,921` rows):** Re-spans the exact same interval `2022-03-15 16:10:34 UTC` – `2026-01-25 13:11:52 UTC` and contains `113,845` exact row-for-row duplicates of Block 1 across all 6 columns (`oblast, raion, hromada, level, started_at, finished_at`) plus `76` non-overlapping rows (`0` internal duplicates).
-* **Block 3 (rows `227,832..299,274`, `71,443` rows):** Spans `2026-01-25 13:34:47 UTC` – `2026-09-07 05:28:22 UTC` (`0` internal duplicates and `0` overlap with Blocks 1–2).
+* **Block 3 (rows `227,832..299,274`, `71,443` rows):** Spans `2026-01-23 12:42:58 UTC` – `2026-09-07 05:28:22 UTC` (`0` internal duplicates and `0` overlap with Blocks 1–2).
 * **Why Metrics Changed After Fixing `cleaner.py`:** Prior to deduplicating rows `0..227,831` and aggregating post-August 2025 `raion`/`hromada` alerts, absolute alert frequencies in RQ1–RQ2 were artificially doubled while the Test base rate was depressed by the logging transition from `oblast` to `raion`. Removing the `113,845` duplicates and reconstructing oblast intervals from `raion`/`hromada` restored the true underlying process (Test base rate **$10.27\%$**, latest 60 days **$12.65\%$**).
 </details>
 
@@ -85,14 +85,14 @@ Direct inspection of `https://raw.githubusercontent.com/Vadimkin/ukrainian-air-r
 
 ## 🔬 2. Stage 1: Exploratory Spatio-Temporal Analytics (RQ1–RQ3)
 
-All three exploratory research questions were evaluated in parallel on Official (`84,907` intervals across 24 oblasts) and Volunteer (`113,525` intervals in `naive_as_is`; `108,576` over the shared time window up to `2026-09-07`).
+All three exploratory research questions were evaluated in parallel on Official (`84,907` intervals across 24 oblasts) and Volunteer (`113,523` intervals across 24 oblasts in `naive_as_is`; `108,576` over the shared time window up to `2026-09-07`).
 
 ### 2.1. Temporal Cyclicity & Alert Durations (RQ1)
-* **Weekly Rhythm (Kruskal-Wallis Test):**
+* **Weekly Rhythm (Kruskal-Wallis Test, [`src/features/cyclicity.py`](src/features/cyclicity.py)):**
   * **Official:** $H = 25.52, \ p = 2.74 \times 10^{-4}$ (3 statistically significant day pairs after Bonferroni correction $\alpha_{\text{adj}} = 0.00238$). Peak activity occurs Wednesday–Friday (median 52–53 merged oblast alerts/day, mean 53.4–55.0), reaching a minimum on Sunday (median 47, mean 46.8 alerts/day).
-  * **Volunteer:** $H = 21.66, \ p = 0.0014$, reproducing the mid-week peak and Sunday trough.
-* **Diurnal Profile & Nocturnal Alerts (`00:00–05:59 Europe/Kyiv`):** After aggregating district-level alerts in 2025–2026, the nocturnal onset share remains stable between **$20.2\%$ and $24.0\%$** across years (2022: $24.0\%$, 2023: $21.5\%$, 2024: $20.2\%$, 2025: $20.5\%$, 2026: $22.9\%$).
-* **Cross-Source Duration Comparison (`reports/comparison/official_vs_volunteer_comparison.csv`):** Over the shared window `2022-03-15 .. 2026-09-07`, median duration on Official is **43.15 min** (mean **102.40 min**) vs. **30.68 min** (mean **49.06 min**) on Volunteer, because merging all district intervals within an oblast after August 2025 on Official creates longer continuous oblast envelopes containing multiple shorter Volunteer waves ($64.5\%$ of post-December 2025 Volunteer starts occur inside an ongoing Official interval).
+  * **Volunteer (`naive_as_is`):** $H = 17.05, \ p = 0.0091$ (also 3 statistically significant day pairs after Bonferroni correction), reproducing the mid-week peak and Sunday trough.
+* **Diurnal Profile & Nocturnal Alerts (`00:00–05:59 Europe/Kyiv`):** After aggregating district-level alerts in 2025–2026, the nocturnal onset share remains stable between **$20.2\%$ and $24.0\%$** across years on Official (2022: $24.0\%$, 2023: $21.5\%$, 2024: $20.2\%$, 2025: $20.5\%$, 2026: $22.9\%$) and **$21.0\% – 26.4\%$** on Volunteer (2022: $23.8\%$, 2023: $21.0\%$, 2024: $21.4\%$, 2025: $26.4\%$, 2026: $22.5\%$).
+* **Cross-Source Duration Comparison ([`reports/comparison/official_vs_volunteer_comparison.csv`](reports/comparison/official_vs_volunteer_comparison.csv)):** Over the shared window `2022-03-15 .. 2026-09-07`, median duration on Official is **43.15 min** (mean **102.40 min**) vs. **30.68 min** (mean **49.06 min**) on Volunteer, because merging all district intervals within an oblast after August 2025 on Official creates longer continuous oblast envelopes containing multiple shorter Volunteer waves ($64.5\%$ of post-December 2025 Volunteer starts occur inside an ongoing Official interval).
 
 <p align="center">
   <img src="reports/official/figures/01_heatmap_24x7.png" alt="24x7 Alert Activity Heatmap" width="85%">
@@ -107,14 +107,14 @@ All three exploratory research questions were evaluated in parallel on Official 
 ### 2.2. Regional Clustering: Descriptive (RQ2) vs. ML (Train-Only)
 The repository strictly separates **descriptive full-period clustering** (for RQ2) from **isolated clustering fitted strictly on `Train <= 2024-04-30`** (fed into ML models with zero future leakage):
 
-1. **Descriptive RQ2 Clustering (`reports/official/regional_clusters_summary.csv`, full period 2022–2026, Ward linkage, Silhouette = 0.4417 at $K=3$):**
-   * **Cluster 1 — Deep Rear / West & North-West (12 regions):** Ivano-Frankivsk, Volyn, Vinnytsia, Zhytomyr, Zakarpattia, Kyiv Oblast, Lviv, Rivne, Ternopil, Khmelnytskyi, Chernivtsi, Kyiv City (avg 25.8 alerts/month, median duration 46.4 min).
-   * **Cluster 2 — Transit Center & South (7 regions):** Dnipropetrovsk, Kirovohrad, Mykolaiv, Odesa, Poltava, Kherson, Cherkasy (avg 90.3 alerts/month, median duration 36.0 min).
-   * **Cluster 3 — Frontline / Border Zone (5 regions):** Donetsk, Zaporizhzhia, Sumy, Kharkiv, Chernihiv (avg 128.3 alerts/month, median duration 57.3 min, share of alerts $\ge 2$h: 28.7%).
-2. **ML Train-Only Clusters (`reports/official/clusters_train_only.csv`, fitted strictly on `Train <= 2024-04-30 23:59:59 UTC` via `generate_train_only_clusters()` in [`src/features/clustering.py`](src/features/clustering.py)):**
+1. **Descriptive RQ2 Clustering ([`reports/official/regional_clusters_summary.csv`](reports/official/regional_clusters_summary.csv), full period 2022–2026, Ward linkage, Silhouette = 0.4417 at $K=3$):**
+   * **Cluster 1 — Deep Rear / West (12 regions on Official / 10 on Volunteer):** Ivano-Frankivsk, Volyn, Vinnytsia, Zhytomyr, Zakarpattia, Kyiv Oblast, Lviv, Rivne, Ternopil, Khmelnytskyi, Chernivtsi, Kyiv City (avg 25.8 alerts/month, median duration 46.4 min on Official).
+   * **Cluster 2 — Transit Center / North (7 regions on Official / 8 on Volunteer):** Dnipropetrovsk, Kirovohrad, Mykolaiv, Odesa, Poltava, Kherson, Cherkasy (avg 90.3 alerts/month, median duration 36.0 min on Official).
+   * **Cluster 3 — Frontline / Border Zone (5 regions on Official / 6 on Volunteer):** Donetsk, Zaporizhzhia, Sumy, Kharkiv, Chernihiv (avg 128.3 alerts/month, median duration 57.3 min, share of alerts $\ge 2$h: 28.7% on Official).
+2. **ML Train-Only Clusters ([`reports/official/clusters_train_only.csv`](reports/official/clusters_train_only.csv), fitted strictly on `Train <= 2024-04-30 23:59:59 UTC` via `generate_train_only_clusters()` in [`src/features/clustering.py`](src/features/clustering.py)):**
    * `cluster_1_low_activity` (`low_activity (активність 2022–04.2024)`, 7 western oblasts): Ivano-Frankivsk, Volyn, Zakarpattia, Lviv, Rivne, Ternopil, Chernivtsi (17.4–22.1 alerts/month).
-   * `cluster_2_medium_activity` (`medium_activity (активність 2022–04.2024)`, 5 central/north-western regions on Official): Vinnytsia, Zhytomyr, Kyiv Oblast, Khmelnytskyi, Kyiv City (24.2–38.2 alerts/month). *(Note: in Volunteer `naive_fixed_D`, Odesa and Cherkasy also join `medium_activity` on Train, yielding a `10 / 7 / 7` split).*
-   * `cluster_3_high_activity` (`high_activity (активність 2022–04.2024)`, 12 eastern, southern, and central oblasts on Official): Dnipropetrovsk, Donetsk, Zaporizhzhia, Kirovohrad, Mykolaiv, Odesa, Poltava, Sumy, Kharkiv, Kherson, Cherkasy, Chernihiv (44.0–168.8 alerts/month).
+   * `cluster_2_medium_activity` (`medium_activity (активність 2022–04.2024)`, 5 central/north-western regions on Official): Vinnytsia, Zhytomyr, Kyiv Oblast, Khmelnytskyi, Kyiv City (24.2–38.2 alerts/month). *(Note: on Volunteer in [`volunteer_clusters_train_only.csv`](reports/volunteer/volunteer_clusters_train_only.csv) and [`volunteer_clusters_train_only_fixed_d.csv`](reports/volunteer/volunteer_clusters_train_only_fixed_d.csv), Odesa and Cherkasy also join `medium_activity` on Train, yielding a `7 low / 7 medium / 10 high` split).*
+   * `cluster_3_high_activity` (`high_activity (активність 2022–04.2024)`, 12 eastern, southern, and central oblasts on Official / 10 on Volunteer): Dnipropetrovsk, Donetsk, Zaporizhzhia, Kirovohrad, Mykolaiv, Odesa, Poltava, Sumy, Kharkiv, Kherson, Cherkasy, Chernihiv (44.0–168.8 alerts/month).
 
 <p align="center">
   <img src="reports/official/figures/05_regional_dendrogram.png" alt="Regional Dendrogram" width="85%">
@@ -122,8 +122,8 @@ The repository strictly separates **descriptive full-period clustering** (for RQ
 </p>
 
 ### 2.3. Spatial Cross-Correlations Between Neighbors (RQ3)
-* After filtering out synchronized nationwide alerts ($\ge 15$ oblasts simultaneously) on a 10-minute discrete grid, cross-correlations with lags $\tau \in [-180, +180]$ min were computed for all 49 contiguous region pairs (`reports/official/spatial_lead_lag_summary.csv`, `reports/volunteer/spatial_lead_lag_summary.csv`).
-* Spearman rank correlation between the peak cross-correlations of the 49 neighbor pairs on Official and Volunteer is **$\rho = 0.960$**. Strongest couplings occur along southern, eastern, and central corridors: Mykolaiv $\leftrightarrow$ Kherson ($r = 0.658$, lag 10 min), Dnipropetrovsk $\leftrightarrow$ Zaporizhzhia ($r = 0.613$), Ivano-Frankivsk $\leftrightarrow$ Lviv ($r = 0.602$, lag 10 min), Kyiv City $\leftrightarrow$ Kyiv Oblast ($r = 0.578$, lag 10 min), Chernihiv $\leftrightarrow$ Sumy ($r = 0.574$, lag 10 min).
+* After filtering out synchronized nationwide alerts ($\ge 15$ oblasts simultaneously) on a 10-minute discrete grid, cross-correlations with lags $\tau \in [-180, +180]$ min were computed for all 49 contiguous region pairs ([`reports/official/spatial_lead_lag_summary.csv`](reports/official/spatial_lead_lag_summary.csv), [`reports/volunteer/spatial_lead_lag_summary.csv`](reports/volunteer/spatial_lead_lag_summary.csv)).
+* Spearman rank correlation between the counts of joint active 10-minute intervals (`joint_active_intervals`) across the 49 neighbor pairs on Official and Volunteer is **$\rho = 0.965$** ($p = 4.68 \times 10^{-29}$), and between peak cross-correlations (`max_correlation`) is **$\rho = 0.411$** ($p = 0.0033$). On Official, strongest couplings occur along southern, eastern, and central corridors: Mykolaiv $\to$ Kherson ($r = 0.658$, lag 10 min), Dnipropetrovsk $\leftrightarrow$ Zaporizhzhia ($r = 0.613$, lag 0 min), Ivano-Frankivsk $\to$ Lviv ($r = 0.602$, lag 10 min), Kyiv City $\to$ Kyiv Oblast ($r = 0.578$, lag 10 min), Chernihiv $\to$ Sumy ($r = 0.574$, lag 10 min).
 
 <p align="center">
   <img src="reports/official/figures/06_spatial_cross_correlation_routes.png" alt="Spatial Cross-Correlation Routes" width="85%">
@@ -142,13 +142,13 @@ The repository strictly separates **descriptive full-period clustering** (for RQ
   * **Set B (A + Spatial at $T$ — 13 features):** Set A + instantaneous status of contiguous neighbors at exact moment $T$: `neighbors_active_count`, `neighbor_any_active`, `neighbor_active_ratio`.
   * **Set C (B + Adaptive & Spatio-Temporal Memory — 22 features, Pre-Specified Primary Configuration):** Set B + 9 historical adaptive and spatio-temporal features: `adaptive_rate_7d/14d/30d`, `national_active_count`, `onsets_last_24h`, `hours_since_last_alert` (`clip(upper=720.0)`), `neighbors_active_lag_1h/2h/3h`.
   * **Set C' (`FEATURE_SET_C_PRIME`: B + Adaptive & Neighbor Lags Only — 19 features, Post-Hoc Experiment):** Set C excluding the three most strongly shifted features (`national_active_count`, `hours_since_last_alert`, `onsets_last_24h`).
-  * **Set D (`FEATURE_SET_D_ASTRO`: Set C + 8 deterministic astronomical and calendar features — 30 features, Post-Hoc Exploratory in Walk-Forward):** Set C + solar altitude (`solar_altitude_deg`), civil/navigational night (`is_night_civil`, `is_twilight_nav`), hours to sunrise/sunset, lunar illumination, and annual harmonics `day_of_year_sin/cos`.
-* **Formal Pre-Specified Validation Selection Rule (`reports/official/val_evaluation_details.json`):**
+  * **Set D (`FEATURE_SET_D_POST_HOC`: Set C + 3 relative activity features `+Rel Ratios` — 25 features, Post-Hoc Exploratory in Walk-Forward):** Set C + 3 pointwise causal relative activity features in [`src/models/run_walk_forward_experiment.py`](src/models/run_walk_forward_experiment.py): `rel_activity_24h_vs_14d`, `adaptive_ratio_7d_vs_30d`, `adaptive_diff_14d_minus_30d`.
+* **Formal Pre-Specified Validation Selection Rule ([`reports/official/val_evaluation_details.json`](reports/official/val_evaluation_details.json)):**
   * Pre-specified selection rule: $\arg\max \text{PR-AUC}$ on Validation (`2024-05-01` – `2025-05-31`) across pre-specified candidates (`Baselines 1–3`, `LogReg A/B/C`, `LightGBM A/B/C`).
   * Validation Winner: **`LightGBM (Set C: Spatial + Adaptive)`** on both Official (`Val PR-AUC = 0.3012 [0.289, 0.314]`, `Val F2 = 0.4910 [0.479, 0.502]`) and Volunteer (`Val PR-AUC = 0.3107 [0.299, 0.323]` in `naive_as_is` and `0.3116 [0.300, 0.324]` in `naive_fixed_D`).
-  * Identifying static `Set B` as top-performing by Test PR-AUC and constructing `Set C'` were performed **after inspecting Test results and are explicitly labeled `post-hoc`**.
+  * Identifying static `Set B` as top-performing by Test PR-AUC and constructing `Set C'` and `Set D` were performed **after inspecting Test results and are explicitly labeled `post-hoc`**.
 
-### Table 3.1. Static Model Benchmark on Full Official Test (`2025-06-01` – `2026-09-07`, `197,083` rows, `reports/official/ml_models_benchmark.csv`)
+### Table 3.1. Static Model Benchmark on Full Official Test (`2025-06-01` – `2026-09-07`, `197,083` rows, [`reports/official/ml_models_benchmark.csv`](reports/official/ml_models_benchmark.csv))
 *95% confidence intervals are computed via **Day-Block Bootstrap** resampling calendar days (`n_bootstraps = 500`). `Prec @ R=78.2%` reports Precision at the exact Recall level of the Adaptive Baseline (`Recall = 78.23%`).*
 
 | Model | Feature Set | Protocol Status | Threshold $p^*$ (Val) | Test PR-AUC [95% CI] | Test $F_2$ [95% CI] | Precision | Recall | Prec @ R=78.2% | Brier Score |
@@ -165,7 +165,7 @@ The repository strictly separates **descriptive full-period clustering** (for RQ
 | **LightGBM (Set C: Spatial + Adaptive)** | C (22 features) | **`pre-specified winner (Val PR-AUC)`** | 0.129 | 0.3329 [0.323, 0.343] | 0.5551 [0.547, 0.562] | 23.0% | 85.8% | 26.3% | 0.0783 |
 | **LightGBM (Set C': Adaptive + Lags)** | C' (19 features) | `post-hoc sensitivity` | 0.129 | 0.3522 [0.342, 0.363] | **0.5683** [0.559, 0.577] | **25.7%** | 81.6% | **27.1%** | 0.0767 |
 
-### Table 3.2. Static Model Benchmark on Latest 60 Days Official (`2026-07-09` – `2026-09-07`, `23,646` rows, base rate `12.65%`, `reports/official/ml_recent_60d_benchmark.csv`)
+### Table 3.2. Static Model Benchmark on Latest 60 Days Official (`2026-07-09` – `2026-09-07`, `23,646` rows, base rate `12.65%`, [`reports/official/ml_recent_60d_benchmark.csv`](reports/official/ml_recent_60d_benchmark.csv))
 
 | Model | Feature Set | Threshold $p^*$ | PR-AUC [95% CI] | $F_2$-Score [95% CI] | Precision | Recall | Prec @ R=90.4% | Brier Score |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -187,14 +187,16 @@ The repository strictly separates **descriptive full-period clustering** (for RQ
 </p>
 
 ### 3.2. Feature Distribution Shift (Covariate Shift) on Official and Volunteer
-[`src/features/analyze_feature_shift.py`](src/features/analyze_feature_shift.py) compares feature means across `Train`, `Val`, and `Test` on both sources (`reports/comparison/official_vs_volunteer_feature_shift_comparison.csv`):
+[`src/features/analyze_feature_shift.py`](src/features/analyze_feature_shift.py) compares feature means across `Train`, `Val`, and `Test` on both sources ([`reports/comparison/official_vs_volunteer_feature_shift_comparison.csv`](reports/comparison/official_vs_volunteer_feature_shift_comparison.csv)):
 
-| Feature | Official: Train $\to$ Val $\to$ Test | Official: Pre / Post `01.08.2025` | Official: Test / Train | Volunteer (`as_is`): Train $\to$ Val $\to$ Test | Volunteer: Test / Train |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **`national_active_count`** | `1.17` $\to$ `3.06` $\to$ **`5.55`** | `3.17` $\to$ `5.95` | **$4.73\times$** | `1.12` $\to$ `3.01` $\to$ **`5.57`** | **$4.95\times$** |
-| **`neighbors_active_count`** | `0.13` $\to$ `0.32` $\to$ **`0.52`** | `0.34` $\to$ `0.55` | **$4.04\times$** | `0.12` $\to$ `0.31` $\to$ **`0.51`** | **$4.15\times$** |
-| **`hours_since_last_alert`** | `32.6` $\to$ `30.1` $\to$ **`42.7`** | `22.8` $\to$ `46.1` | **$1.31\times$** | `32.7` $\to$ `30.1` $\to$ **`38.8`** | **$1.18\times$** |
-| **`adaptive_rate_14d`** | `0.075` $\to$ `0.083` $\to$ **`0.078`** | `0.073` $\to$ `0.079` | **$1.04\times$** | `0.075` $\to$ `0.097` $\to$ **`0.119`** | **$1.59\times$** |
+| Feature | Official: Train $\to$ Val $\to$ Test | Official: Pre / Post `01.08.2025` | Official: Test / Train | Volunteer (`as_is`): Train $\to$ Val $\to$ Test | Volunteer: Pre / Post `01.08.2025` | Volunteer: Test / Train |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`national_active_count`** | `1.17` $\to$ `3.06` $\to$ **`5.54`** | `3.17` $\to$ `5.95` ($1.88\times$) | **$4.73\times$** | `1.26` $\to$ `2.02` $\to$ **`2.17`** | `1.98` $\to$ `2.20` ($1.11\times$) | **$1.72\times$** |
+| **`neighbors_active_count`** | `0.13` $\to$ `0.32` $\to$ **`0.52`** | `0.34` $\to$ `0.55` ($1.62\times$) | **$4.04\times$** | `0.16` $\to$ `0.28` $\to$ **`0.32`** | `0.27` $\to$ `0.32` ($1.21\times$) | **$1.97\times$** |
+| **`hours_since_last_alert`** | `32.6` $\to$ `30.1` $\to$ **`42.7`** | `22.8` $\to$ `46.1` ($2.02\times$) | **$1.31\times$** | `31.2` $\to$ `26.9` $\to$ **`30.9`** | `20.5` $\to$ `32.4` ($1.58\times$) | **$0.99\times$** |
+| **`adaptive_rate_14d`** | `0.075` $\to$ `0.083` $\to$ **`0.078`** | `0.073` $\to$ `0.079` ($1.07\times$) | **$1.04\times$** | `0.084` $\to$ `0.104` $\to$ **`0.140`** | `0.101` $\to$ `0.145` ($1.44\times$) | **$1.66\times$** |
+| **`onsets_last_24h`** | `1.73` $\to$ `1.89` $\to$ **`1.80`** | `1.75` $\to$ `1.81` ($1.03\times$) | **$1.04\times$** | `1.95` $\to$ `2.41` $\to$ **`3.32`** | `2.43` $\to$ `3.44` ($1.42\times$) | **$1.70\times$** |
+| **`target_onset_next_1h`** | `0.081` $\to$ `0.102` $\to$ **`0.103`** | `0.096` $\to$ `0.104` ($1.08\times$) | **$1.27\times$** | `0.091` $\to$ `0.115` $\to$ **`0.153`** | `0.114` $\to$ `0.159` ($1.39\times$) | **$1.69\times$** |
 
 <p align="center">
   <img src="reports/comparison/figures/16_comparison_feature_shift_official_vs_volunteer.png" alt="Feature Shift Comparison Official vs Volunteer" width="90%">
@@ -202,7 +204,7 @@ The repository strictly separates **descriptive full-period clustering** (for RQ
 </p>
 
 ### 3.3. Independent Volunteer Verification & Sensitivity to 3 Causal `naive` Policies
-In the Volunteer corpus (`data/raw/volunteer_data_uk.csv`), a subset of historical rows carries the `naive == True` flag (where exact end time was unknown and imputed as `started_at + 30 min`). To verify that findings are not driven by imputation artifacts, [`src/models/run_volunteer_pipeline.py`](src/models/run_volunteer_pipeline.py) evaluates **three strictly causal policies** (`reports/volunteer/volunteer_naive_sensitivity.csv`):
+In the Volunteer corpus (`data/raw/volunteer_data_uk.csv`), a subset of historical rows carries the `naive == True` flag (where exact end time was unknown and imputed as `started_at + 30 min`). To verify that findings are not driven by imputation artifacts, [`src/models/run_volunteer_experiment.py`](src/models/run_volunteer_experiment.py) evaluates **three strictly causal policies** ([`reports/volunteer/volunteer_naive_sensitivity.csv`](reports/volunteer/volunteer_naive_sensitivity.csv)):
 
 | `naive` Policy | Calm Hours (Total / Test) | Test Base Rate (`positives`) | Adaptive 14d: Test PR-AUC [95% CI] / Test $F_2$ [95% CI] | LightGBM (Set C, static): Test PR-AUC [95% CI] / Test $F_2$ [95% CI] | Paired $\Delta\text{PR-AUC}$ (`LGBM C − Adaptive`) | Paired $\Delta F_2$ (`LGBM C − Adaptive`) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -218,7 +220,7 @@ In the Volunteer corpus (`data/raw/volunteer_data_uk.csv`), a subset of historic
 <details>
 <summary><b>📊 Expand Additional Static Benchmark Tables: Pre/Post 2025-08-01 Sub-Periods & Ablation Study Matrix (Official)</b></summary>
 
-#### Table 3.3. Static Model Results Inside Test Before and After `2025-08-01` (`reports/official/ml_test_pre_aug2025_benchmark.csv`, `reports/official/ml_test_post_aug2025_benchmark.csv`)
+#### Table 3.3. Static Model Results Inside Test Before and After `2025-08-01` ([`reports/official/ml_test_pre_aug2025_benchmark.csv`](reports/official/ml_test_pre_aug2025_benchmark.csv), [`reports/official/ml_test_post_aug2025_benchmark.csv`](reports/official/ml_test_post_aug2025_benchmark.csv))
 
 | Model | Pre-01.08.2025 (`28,929`): PR-AUC [95% CI] | Pre-01.08.2025: $F_2$ [95% CI] | Pre-01.08: Prec / Rec (Prec@R=68.6%) | Post-01.08.2025 (`168,154`): PR-AUC [95% CI] | Post-01.08.2025: $F_2$ [95% CI] | Post-01.08: Prec / Rec (Prec@R=79.8%) |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -232,7 +234,7 @@ In the Volunteer corpus (`data/raw/volunteer_data_uk.csv`), a subset of historic
 | **LightGBM (Set C)** *(Val winner)* | 0.3006 [0.284, 0.321] | 0.5044 [0.487, 0.522] | 23.3% / 71.2% (21.0%) | 0.3386 [0.327, 0.350] | 0.5623 [0.553, 0.571] | 23.0% / 88.1% (27.1%) |
 | **LightGBM (Set C')** *(post-hoc)* | **0.3124** [0.295, 0.330] | **0.5106** [0.493, 0.530] | **25.1%** / 68.9% (**21.0%**) | 0.3582 [0.346, 0.370] | **0.5769** [0.568, 0.586] | 25.7% / 83.7% (**27.8%**) |
 
-#### Table 3.4. Paired Bootstrap Metric Differences Across 4 Test Slices (`reports/official/test_evaluation_details.json`, Day-Block Bootstrap $N=500$)
+#### Table 3.4. Paired Bootstrap Metric Differences Across 4 Test Slices ([`reports/official/test_evaluation_details.json`](reports/official/test_evaluation_details.json), Day-Block Bootstrap $N=500$)
 
 | Comparison (Paired Difference, Official) | Full Test: $\Delta$ PR-AUC / $\Delta F_2$ | Pre-01.08.2025: $\Delta$ PR-AUC / $\Delta F_2$ | Post-01.08.2025: $\Delta$ PR-AUC / $\Delta F_2$ | Latest 60 Days: $\Delta$ PR-AUC / $\Delta F_2$ |
 | :--- | :---: | :---: | :---: | :---: |
@@ -248,7 +250,7 @@ In the Volunteer corpus (`data/raw/volunteer_data_uk.csv`), a subset of historic
 
 ## 🔄 4. Stage 2 (Block B): Monthly Walk-Forward Retraining
 
-### 4.1. Causal Walk-Forward Protocol (`src/models/run_walk_forward_experiment.py`)
+### 4.1. Causal Walk-Forward Protocol ([`src/models/run_walk_forward_experiment.py`](src/models/run_walk_forward_experiment.py))
 To evaluate how periodic tree refitting adapts to the 2025–2026 alert regime, [`src/models/run_walk_forward_experiment.py`](src/models/run_walk_forward_experiment.py) implements a strictly causal monthly `Walk-Forward Retraining` protocol:
 * **Refit Cadence:** Every calendar month $M$ of the Test split starting from `2025-06` (`16` test months `2025-06..2026-09` on Official; `17` test months `2025-06..2026-10` on Volunteer `naive_fixed_D`).
 * **Training & Internal Validation Windows Before Month $M$:**
@@ -257,26 +259,29 @@ To evaluate how periodic tree refitting adapts to the 2025–2026 alert regime, 
 * **Strict 2-Hour `embargo` Buffer:** Between `Train_M` and `Val_M`, and between `Val_M` and the start of test month $M$, the final 2 hours are excluded (`embargo_hours = 2`), preventing any overlap of target windows $[T, T+1\text{h})$ across split boundaries.
 * **Hypothesis Status in the Walk-Forward Block (`protocol_status`):**
   * `LightGBM (Set C) [WF Rolling 12m]` — **`primary hypothesis of the WF block (specified after viewing static Test results)`**.
-  * `LightGBM (Set D) [WF Rolling 12m]` — `post-hoc exploratory` (testing deterministic astronomical and calendar features `Set D`).
-  * `LightGBM (Set C) [WF Expanding]`, `LightGBM (Set B / C') [WF Rolling 12m]`, `LogReg (Set C) [WF Rolling 12m]` — `exploratory`.
-* **Static Reference in WF Tables (`Static Initial Train`):** Uses the frozen artifact `models/lightgbm_adaptive.joblib` ($p^*=0.1290$) on Official and the frozen artifact **`models/volunteer_lightgbm_adaptive_fixed_d.joblib`** ($p^*=0.1131$, trained and evaluated strictly on the causal `naive_fixed_D` grid) on Volunteer.
+  * `LogReg (Set C) [WF Rolling 12m]` — `exploratory (pre-specified Set C)`.
+  * `LightGBM / LogReg (Set C) [WF Expanding]` — `exploratory (expanding window)`.
+  * `LightGBM / LogReg (Set D: +Rel Ratios) [WF Rolling 12m / Expanding, post-hoc]` — `post-hoc exploratory (Set D)` (testing the 3 dimensionless relative activity ratios in `Set D`, 25 features).
+* **Static Reference in WF Tables (`Static Initial Train`):** Uses the frozen artifact [`models/lightgbm_adaptive.joblib`](models/lightgbm_adaptive.joblib) ($p^*=0.1290$) on Official and the frozen artifact **[`models/volunteer_lightgbm_adaptive_fixed_d.joblib`](models/volunteer_lightgbm_adaptive_fixed_d.joblib)** ($p^*=0.1131$, trained and evaluated strictly on the causal `naive_fixed_D` grid) on Volunteer.
 
-### Table 4.1. Consolidated Walk-Forward Benchmark vs. Static Models & Baselines (`reports/comparison/official_vs_volunteer_walk_forward_comparison.csv`)
+### Table 4.1. Consolidated Walk-Forward Benchmark vs. Static Models & Baselines (All 14 Rows From [`reports/comparison/official_vs_volunteer_walk_forward_comparison.csv`](reports/comparison/official_vs_volunteer_walk_forward_comparison.csv))
 
 | Row / Model in WF Protocol | Protocol Status (`protocol_status`) | Official Full Test (`197,083`): Pooled PR-AUC [95% CI] / $F_2$ [95% CI] ($\Delta$ PR-AUC vs Adapt) | Official Latest 60 Days (`23,646`): Pooled PR-AUC [95% CI] / $F_2$ [95% CI] ($\Delta$ PR-AUC vs Adapt) | Volunteer `fixed_D` Full Test (`256,490`): Pooled PR-AUC [95% CI] / $F_2$ [95% CI] ($\Delta$ PR-AUC vs Adapt) | Volunteer `fixed_D` Latest 60 Days (`30,347`): Pooled PR-AUC [95% CI] / $F_2$ [95% CI] ($\Delta$ PR-AUC vs Adapt) |
 | :--- | :--- | :---: | :---: | :---: | :---: |
-| **Baseline 1: True Naive Persistence** | `baseline_reference` | —<br>0.1034 [0.096, 0.111] | —<br>0.1621 [0.145, 0.181] | —<br>0.1904 [0.183, 0.198] | —<br>0.2695 [0.258, 0.283] |
-| **Baseline 2: Historical Lookup (WF)** | `baseline_reference` | 0.2739 [0.265, 0.283]<br>0.5204 [0.512, 0.529] | 0.3545 [0.323, 0.386]<br>0.6251 [0.600, 0.651] | 0.2998 [0.293, 0.306]<br>0.5566 [0.551, 0.563] | 0.3596 [0.346, 0.373]<br>0.6194 [0.608, 0.630] |
-| **Baseline 3: Adaptive 14-day (WF $p^*_M$)** | `baseline_reference` | 0.3031 [0.292, 0.315]<br>0.5275 [0.518, 0.536] | 0.3682 [0.333, 0.406]<br>0.6399 [0.615, 0.665] | 0.3924 [0.384, 0.401]<br>0.5901 [0.584, 0.596] | 0.4810 [0.469, 0.496]<br>0.6656 [0.656, 0.675] |
-| **LightGBM (Set C) [Static Initial Train]** | `static_reference` | 0.3329 [0.323, 0.343]<br>0.5551 [0.547, 0.562]<br>($+0.0297 \ [+0.0220, +0.0373]$) | 0.3809 [0.348, 0.416]<br>0.6301 [0.603, 0.654]<br>($+0.0126 \ [-0.0055, +0.0314]$) | 0.3902 [0.383, 0.397]<br>0.5960 [0.590, 0.602]<br>($-0.0019 \ [-0.0065, +0.0024]$) | 0.4546 [0.440, 0.472]<br>0.6674 [0.658, 0.677]<br>($-0.0262 \ [-0.0360, -0.0156]$) |
-| **LogReg (Set C) [Static Initial Train]** | `static_reference` | 0.3173 [0.306, 0.328]<br>0.5431 [0.535, 0.550]<br>($+0.0140 \ [+0.0089, +0.0199]$) | 0.3889 [0.354, 0.423]<br>0.6196 [0.592, 0.643]<br>($+0.0205 \ [+0.0054, +0.0359]$) | **0.4097** [0.401, 0.418]<br>0.5924 [0.586, 0.598]<br>(**$+0.0174 \ [+0.0150, +0.0200]$**) | **0.5002** [0.487, 0.515]<br>0.6635 [0.655, 0.673]<br>(**$+0.0194 \ [+0.0133, +0.0257]$**) |
-| **LightGBM (Set C) [WF Rolling 12m]** | `primary hypothesis of the WF block (specified after viewing static Test results)` | **0.4203** [0.409, 0.431]<br>**0.5757** [0.566, 0.584]<br>(**$+0.1171 \ [+0.1081, +0.1261]$**) | **0.5139** [0.488, 0.541]<br>**0.6597** [0.636, 0.684]<br>(**$+0.1450 \ [+0.1177, +0.1726]$**) | 0.4050 [0.397, 0.413]<br>**0.5989** [0.594, 0.605]<br>(**$+0.0128 \ [+0.0082, +0.0168]$**) | 0.4975 [0.486, 0.512]<br>0.6685 [0.659, 0.678]<br>(**$+0.0167 \ [+0.0089, +0.0252]$**) |
-| **LightGBM (Set C) [WF Expanding]** | `exploratory` | 0.4173 [0.406, 0.428]<br>0.5751 [0.566, 0.584]<br>($+0.1140 \ [+0.1053, +0.1228]$) | 0.4977 [0.469, 0.525]<br>0.6562 [0.632, 0.679]<br>($+0.1288 \ [+0.1010, +0.1578]$) | 0.4057 [0.398, 0.414]<br>0.5988 [0.593, 0.604]<br>($+0.0135 \ [+0.0091, +0.0176]$) | 0.4940 [0.481, 0.510]<br>0.6685 [0.659, 0.678]<br>($+0.0131 \ [+0.0049, +0.0220]$) |
-| **LightGBM (Set B) [WF Rolling 12m]** | `exploratory` | 0.3914 [0.380, 0.402]<br>0.5588 [0.550, 0.568]<br>($+0.0881 \ [+0.0796, +0.0972]$) | 0.4718 [0.443, 0.499]<br>0.6540 [0.630, 0.677]<br>($+0.1029 \ [+0.0734, +0.1328]$) | 0.4106 [0.403, 0.419]<br>0.5966 [0.591, 0.602]<br>($+0.0184 \ [+0.0132, +0.0233]$) | 0.4832 [0.470, 0.499]<br>0.6657 [0.656, 0.676]<br>($+0.0024 \ [-0.0079, +0.0124]$) |
-| **LightGBM (Set C') [WF Rolling 12m]** | `exploratory` | 0.3985 [0.388, 0.409]<br>0.5675 [0.558, 0.576]<br>($+0.0953 \ [+0.0875, +0.1034]$) | 0.4878 [0.461, 0.515]<br>0.6632 [0.640, 0.686]<br>($+0.1189 \ [+0.0920, +0.1460]$) | 0.4050 [0.397, 0.413]<br>0.5998 [0.594, 0.605]<br>($+0.0128 \ [+0.0085, +0.0169]$) | 0.4926 [0.481, 0.508]<br>0.6694 [0.661, 0.679]<br>($+0.0117 \ [+0.0038, +0.0201]$) |
-| **LightGBM (Set D) [WF Rolling 12m]** | `post-hoc exploratory` | 0.4222 [0.411, 0.433]<br>0.5760 [0.567, 0.585]<br>($+0.1190 \ [+0.1101, +0.1282]$) | 0.5089 [0.482, 0.535]<br>0.6626 [0.640, 0.684]<br>($+0.1399 \ [+0.1137, +0.1656]$) | 0.4063 [0.399, 0.414]<br>0.5988 [0.593, 0.604]<br>($+0.0141 \ [+0.0094, +0.0184]$) | 0.4930 [0.482, 0.508]<br>**0.6697** [0.661, 0.680]<br>($+0.0121 \ [+0.0040, +0.0206]$) |
-| **LogReg (Set C) [WF Rolling 12m]** | `exploratory` | 0.3964 [0.386, 0.407]<br>0.5636 [0.555, 0.572]<br>($+0.0932 \ [+0.0849, +0.1017]$) | 0.5037 [0.478, 0.531]<br>0.6426 [0.618, 0.668]<br>($+0.1348 \ [+0.1112, +0.1604]$) | 0.4057 [0.397, 0.414]<br>0.5952 [0.589, 0.601]<br>($+0.0134 \ [+0.0105, +0.0163]$) | 0.4962 [0.484, 0.511]<br>0.6660 [0.657, 0.675]<br>($+0.0154 \ [+0.0096, +0.0213]$) |
-| **LogReg Static проти LGBM WF (`Set C: LGBM_WF − LogReg_Static`)** | `direct_comparison` | **$\Delta\text{PR-AUC} = +0.1031 \ [+0.0944, +0.1120]$**<br>$\Delta F_2 = +0.0325 \ [+0.0276, +0.0371]$<br>$\Delta\text{Brier} = -0.2141$ | **$\Delta\text{PR-AUC} = +0.1245 \ [+0.1030, +0.1479]$**<br>$\Delta F_2 = +0.0407 \ [+0.0305, +0.0521]$<br>$\Delta\text{Brier} = -0.2179$ | **$\Delta\text{PR-AUC} = -0.0046 \ [-0.0081, -0.0013]$**<br>$\Delta F_2 = +0.0064 \ [+0.0044, +0.0083]$<br>$\Delta\text{Brier} = -0.1552$ | $\Delta\text{PR-AUC} = -0.0027 \ [-0.0073, +0.0028]$<br>$\Delta F_2 = +0.0049 \ [+0.0006, +0.0097]$<br>$\Delta\text{Brier} = -0.1499$ |
+| **1. Reference: Predict-All ($p^* = 0.0$)** | `reference (base-rate F2 floor)` | —<br>0.3640 [0.354, 0.373] | —<br>0.4201 [0.395, 0.442] | —<br>0.4752 [0.467, 0.484] | —<br>0.5885 [0.575, 0.603] |
+| **2. Baseline 3: Adaptive 14-day (Static Val $p^*$)** | `reference baseline (frozen Val p*)` | 0.3031 [0.292, 0.315]<br>0.5299 [0.520, 0.538]<br>($+0.0000$) | 0.3682 [0.333, 0.406]<br>0.6430 [0.620, 0.664]<br>($+0.0000$) | 0.3924 [0.384, 0.401]<br>0.5905 [0.584, 0.596]<br>($+0.0000$) | 0.4810 [0.469, 0.496]<br>0.6664 [0.657, 0.676]<br>($+0.0000$) |
+| **3. Baseline 3: Adaptive 14-day (WF $p^*_M$)** | `PRIMARY FAIR BASELINE (WF p*_M)` | 0.3031 [0.292, 0.315]<br>0.5275 [0.518, 0.536]<br>($+0.0000$) | 0.3682 [0.333, 0.406]<br>0.6399 [0.615, 0.665]<br>($+0.0000$) | 0.3924 [0.384, 0.401]<br>0.5901 [0.584, 0.596]<br>($+0.0000$) | 0.4810 [0.469, 0.496]<br>0.6656 [0.656, 0.675]<br>($+0.0000$) |
+| **4. LightGBM (Set C) [Static Initial Train]** | `reference static model (Val winner, frozen .joblib)` | 0.3329 [0.323, 0.343]<br>0.5551 [0.547, 0.562]<br>($+0.0297 \ [+0.0220, +0.0373]$) | 0.3809 [0.348, 0.416]<br>0.6301 [0.603, 0.654]<br>($+0.0126 \ [-0.0055, +0.0314]$) | 0.3902 [0.383, 0.397]<br>0.5960 [0.590, 0.602]<br>($-0.0019 \ [-0.0065, +0.0024]$) | 0.4546 [0.440, 0.472]<br>0.6674 [0.658, 0.677]<br>($-0.0262 \ [-0.0360, -0.0156]$) |
+| **5. LogReg (Set C) [Static Initial Train]** | `reference static model` | 0.3173 [0.306, 0.328]<br>0.5431 [0.535, 0.550]<br>($+0.0140 \ [+0.0089, +0.0199]$) | 0.3889 [0.354, 0.423]<br>0.6196 [0.592, 0.643]<br>($+0.0205 \ [+0.0052, +0.0349]$) | **0.4097** [0.401, 0.418]<br>0.5924 [0.586, 0.598]<br>(**$+0.0174 \ [+0.0150, +0.0200]$**) | **0.5002** [0.487, 0.515]<br>0.6635 [0.655, 0.673]<br>(**$+0.0194 \ [+0.0133, +0.0257]$**) |
+| **6. LightGBM (Set C) [WF Rolling 12m]** | `primary hypothesis of the WF block (specified after viewing static Test results)` | **0.4203** [0.409, 0.431]<br>**0.5757** [0.566, 0.584]<br>(**$+0.1171 \ [+0.1081, +0.1261]$**) | 0.5139 [0.488, 0.541]<br>0.6597 [0.636, 0.684]<br>(**$+0.1450 \ [+0.1177, +0.1726]$**) | 0.4050 [0.397, 0.413]<br>0.5989 [0.594, 0.605]<br>(**$+0.0128 \ [+0.0082, +0.0168]$**) | 0.4975 [0.486, 0.512]<br>0.6685 [0.659, 0.678]<br>(**$+0.0167 \ [+0.0089, +0.0252]$**) |
+| **7. LogReg (Set C) [WF Rolling 12m]** | `exploratory (pre-specified Set C)` | 0.3964 [0.386, 0.407]<br>0.5636 [0.555, 0.572]<br>($+0.0932 \ [+0.0849, +0.1017]$) | 0.4719 [0.446, 0.499]<br>**0.6647** [0.641, 0.688]<br>($+0.1039 \ [+0.0798, +0.1293]$) | 0.4057 [0.397, 0.414]<br>0.5952 [0.589, 0.601]<br>($+0.0134 \ [+0.0105, +0.0163]$) | 0.4980 [0.486, 0.513]<br>0.6688 [0.660, 0.679]<br>($+0.0171 \ [+0.0108, +0.0230]$) |
+| **8. LightGBM (Set D: +Rel Ratios) [WF Rolling 12m, post-hoc]** | `post-hoc exploratory (Set D)` | 0.4190 [0.409, 0.429]<br>0.5753 [0.567, 0.583]<br>($+0.1158 \ [+0.1066, +0.1248]$) | 0.5082 [0.482, 0.533]<br>0.6593 [0.635, 0.682]<br>($+0.1394 \ [+0.1100, +0.1695]$) | 0.4053 [0.397, 0.413]<br>0.5984 [0.593, 0.604]<br>($+0.0129 \ [+0.0085, +0.0172]$) | 0.4979 [0.486, 0.512]<br>0.6677 [0.658, 0.678]<br>($+0.0171 \ [+0.0092, +0.0255]$) |
+| **9. LogReg (Set D: +Rel Ratios) [WF Rolling 12m, post-hoc]** | `post-hoc exploratory (Set D)` | 0.3964 [0.386, 0.407]<br>0.5631 [0.554, 0.572]<br>($+0.0932 \ [+0.0848, +0.1018]$) | 0.4718 [0.447, 0.499]<br>0.6638 [0.640, 0.687]<br>($+0.1038 \ [+0.0797, +0.1291]$) | 0.4060 [0.398, 0.415]<br>0.5951 [0.589, 0.601]<br>($+0.0137 \ [+0.0107, +0.0165]$) | 0.4981 [0.486, 0.513]<br>0.6705 [0.662, 0.680]<br>($+0.0171 \ [+0.0109, +0.0230]$) |
+| **10. LightGBM (Set C) [WF Expanding]** | `exploratory (expanding window)` | 0.4227 [0.412, 0.433]<br>0.5737 [0.565, 0.581]<br>($+0.1195 \ [+0.1108, +0.1282]$) | **0.5165** [0.492, 0.542]<br>0.6598 [0.637, 0.681]<br>(**$+0.1477 \ [+0.1228, +0.1738]$**) | 0.4077 [0.400, 0.415]<br>0.5990 [0.593, 0.605]<br>($+0.0155 \ [+0.0117, +0.0195]$) | 0.4979 [0.485, 0.513]<br>0.6688 [0.659, 0.678]<br>($+0.0171 \ [+0.0092, +0.0252]$) |
+| **11. LogReg (Set C) [WF Expanding]** | `exploratory (expanding window)` | 0.3673 [0.356, 0.378]<br>0.5603 [0.551, 0.568]<br>($+0.0641 \ [+0.0575, +0.0709]$) | 0.4291 [0.398, 0.460]<br>0.6612 [0.638, 0.683]<br>($+0.0608 \ [+0.0429, +0.0795]$) | 0.4100 [0.402, 0.418]<br>0.5940 [0.588, 0.600]<br>($+0.0177 \ [+0.0150, +0.0203]$) | 0.4987 [0.486, 0.514]<br>0.6656 [0.657, 0.675]<br>($+0.0178 \ [+0.0116, +0.0242]$) |
+| **12. LightGBM (Set D: +Rel Ratios) [WF Expanding, post-hoc]** | `post-hoc exploratory (Set D, expanding)` | **0.4235** [0.413, 0.434]<br>0.5717 [0.563, 0.579]<br>(**$+0.1203 \ [+0.1113, +0.1294]$**) | 0.5145 [0.490, 0.540]<br>0.6582 [0.636, 0.680]<br>($+0.1457 \ [+0.1213, +0.1711]$) | 0.4081 [0.400, 0.416]<br>**0.5997** [0.594, 0.606]<br>($+0.0159 \ [+0.0121, +0.0198]$) | 0.4988 [0.486, 0.514]<br>**0.6705** [0.662, 0.680]<br>($+0.0179 \ [+0.0098, +0.0259]$) |
+| **13. LogReg (Set D: +Rel Ratios) [WF Expanding, post-hoc]** | `post-hoc exploratory (Set D, expanding)` | 0.3680 [0.357, 0.379]<br>0.5600 [0.551, 0.568]<br>($+0.0648 \ [+0.0579, +0.0718]$) | 0.4311 [0.400, 0.462]<br>0.6597 [0.638, 0.682]<br>($+0.0628 \ [+0.0446, +0.0820]$) | **0.4100** [0.402, 0.418]<br>0.5941 [0.588, 0.600]<br>(**$+0.0177 \ [+0.0150, +0.0203]$**) | 0.4988 [0.486, 0.514]<br>0.6670 [0.658, 0.676]<br>($+0.0179 \ [+0.0117, +0.0243]$) |
+| **14. LogReg Static проти LGBM WF (`Set C: LGBM_WF − LogReg_Static`)** | `direct paired comparison (LGBM WF Rolling 12m − LogReg Static)` | **$\Delta\text{PR-AUC} = +0.1031 \ [+0.0944, +0.1120]$**<br>$\Delta F_2 = +0.0325 \ [+0.0276, +0.0371]$<br>$\Delta\text{Brier} = -0.2140$ | **$\Delta\text{PR-AUC} = +0.1245 \ [+0.1030, +0.1479]$**<br>$\Delta F_2 = +0.0407 \ [+0.0305, +0.0521]$<br>$\Delta\text{Brier} = -0.2164$ | **$\Delta\text{PR-AUC} = -0.0046 \ [-0.0081, -0.0013]$**<br>$\Delta F_2 = +0.0064 \ [+0.0044, +0.0083]$<br>$\Delta\text{Brier} = -0.1552$ | $\Delta\text{PR-AUC} = -0.0027 \ [-0.0073, +0.0028]$<br>$\Delta F_2 = +0.0049 \ [+0.0006, +0.0097]$<br>$\Delta\text{Brier} = -0.1709$ |
 
 <p align="center">
   <img src="reports/comparison/figures/19_walk_forward_vs_static_comparison.png" alt="Monthly Walk-Forward vs Static Dynamics" width="95%">
@@ -286,35 +291,35 @@ To evaluate how periodic tree refitting adapts to the 2025–2026 alert regime, 
 ### 4.2. Walk-Forward Interpretation, `LogReg Static vs. LGBM WF` Caveat & Non-Causal Phrasing
 1. **Why Row 14 (`LogReg Static проти LGBM WF`) Is Explicitly Reported:**
    * On **Official**, monthly `LightGBM (Set C) [WF Rolling 12m]` outperforms all static and linear alternatives, beating `LogReg Static` by **$\Delta\text{PR-AUC} = +0.1031 \ [+0.0944, +0.1120]$** on Full Test and **$+0.1245 \ [+0.1030, +0.1479]$** on the latest 60 days.
-   * On **Volunteer (`naive_fixed_D`)**, however, while monthly refitting significantly lifts `LightGBM (Set C) [WF Rolling 12m]` over static LightGBM ($\Delta_{\text{WF − Static}} = +0.0147 \ [+0.0110, +0.0180]$ on Full Test and $+0.0430 \ [+0.0331, +0.0520]$ on the latest 60 days) and beats `Adaptive 14-day` in `15/17` months, **`LightGBM` cannot be called unconditionally best on Volunteer**. Static linear `LogReg (Set C) [Static Initial Train]`, which extrapolates monotonically under rising `national_active_count`, retains a higher `PR-AUC` on Full Test (`0.4097` vs. `0.4050`, $\Delta\text{PR-AUC} = -0.0046 \ [-0.0081, -0.0013]$) and is statistically indistinguishable on the latest 60 days (`0.5002` vs. `0.4975`, $\Delta\text{PR-AUC} = -0.0027 \ [-0.0073, +0.0028]$). `LightGBM WF` outperforms `LogReg Static` on Volunteer only on thresholded $F_2$-Score ($\Delta F_2 = +0.0064 \ [+0.0044, +0.0083]$) and probability calibration (`Brier = 0.1093` vs. `0.2645`).
+   * On **Volunteer (`naive_fixed_D`)**, however, while monthly refitting significantly lifts `LightGBM (Set C) [WF Rolling 12m]` over static LightGBM ($\Delta_{\text{WF − Static}} = +0.0147 \ [+0.0110, +0.0180]$ on Full Test and $+0.0430 \ [+0.0331, +0.0520]$ on the latest 60 days) and beats `Adaptive 14-day` in `15/17` months, **`LightGBM` cannot be called unconditionally best on Volunteer**. Static linear `LogReg (Set C) [Static Initial Train]`, which extrapolates monotonically under rising alert activity, retains a higher `PR-AUC` on Full Test (`0.4097` vs. `0.4050`, $\Delta\text{PR-AUC} = -0.0046 \ [-0.0081, -0.0013]$) and is statistically indistinguishable on the latest 60 days (`0.5002` vs. `0.4975`, $\Delta\text{PR-AUC} = -0.0027 \ [-0.0073, +0.0028]$). `LightGBM WF` outperforms `LogReg Static` on Volunteer only on thresholded $F_2$-Score ($\Delta F_2 = +0.0064 \ [+0.0044, +0.0083]$) and probability calibration (`Brier = 0.1093` vs. `0.2645`).
 2. **Non-Causal Phrasing (`is consistent with` rather than causal claims):**
-   * The observation that full `Set C` under Walk-Forward regains superiority over reduced `Set B` and `Set C'` on Official ($\Delta_{\text{C − B}} = +0.0289 \ [+0.0243, +0.0338]$, $\Delta_{\text{C − C'}} = +0.0218 \ [+0.0176, +0.0260]$) and matches/exceeds `Set C'` on Volunteer (`0.4050` vs. `0.4050` on Full Test and `0.4975` vs. `0.4926` on the latest 60 days) **is consistent with (`узгоджується з`) the hypothesis** that static `Set C` degradation was linked to stale tree split thresholds under the 5x shift in `national_active_count` and post-August 2025 logging changes. Because no separate causal intervention test was conducted to isolate a single cause, we strictly use the phrasing "is consistent with".
+   * The observed gain of `LightGBM (Set C) [WF Rolling 12m]` over frozen `LightGBM Static` on Official ($\Delta_{\text{WF − Static}} = +0.0873 \ [+0.0789, +0.0954]$ on Full Test and $+0.1324 \ [+0.1142, +0.1510]$ on the latest 60 days) and on Volunteer ($\Delta_{\text{WF − Static}} = +0.0147 \ [+0.0110, +0.0180]$ on Full Test and $+0.0430 \ [+0.0331, +0.0520]$ on the latest 60 days) **is consistent with (`узгоджується з`) the hypothesis** that periodic refitting adapts tree split thresholds to the post-June 2025 regime shift and relieves split saturation when features exceed their 2022–2024 training range. Because no separate causal intervention test was conducted to isolate a single cause, we strictly use the phrasing "is consistent with".
 
 ### 4.3. Hyperparameter Alignment Audit: Initial WF Run vs. Aligned Run (`hyperparameter_alignment_history`)
-In the initial (pre-commit) run of [`src/models/run_walk_forward_experiment.py`](src/models/run_walk_forward_experiment.py), `fit_fold_lightgbm` used different hyperparameters (`n_estimators=600, learning_rate=0.04, num_leaves=31, max_depth=6, min_child_samples=120, class_weight='balanced', eval_metric='average_precision'`) than the canonical static training script [`src/models/train_models.py`](src/models/train_models.py) (`n_estimators=300, learning_rate=0.05, num_leaves=31, max_depth=-1, min_child_samples=50`, no `class_weight`, `eval_metric='binary_logloss'`), and the `Static Initial Train` reference on Volunteer evaluated `volunteer_lightgbm_adaptive.joblib` (trained on `naive_as_is`) over the `naive_fixed_D` test grid. After aligning the WF hyperparameters to match `train_models.py` and switching `Static Initial Train` to `volunteer_lightgbm_adaptive_fixed_d.joblib` ($p^*=0.1131$), the conclusion for `LightGBM (Set C) [WF Rolling 12m]` on Volunteer reversed from trailing `Adaptive 14-day` to statistically significantly outperforming it:
+As documented in [`reports/volunteer/volunteer_walk_forward_details.json`](reports/volunteer/volunteer_walk_forward_details.json) (`methodological_notes.hyperparameter_alignment_history`) and [`notebooks/05_ml_forecasting_experiment.ipynb`](notebooks/05_ml_forecasting_experiment.ipynb), during the initial (pre-commit) run of [`src/models/run_walk_forward_experiment.py`](src/models/run_walk_forward_experiment.py), `fit_fold_lightgbm` used different hyperparameters (`n_estimators=600, learning_rate=0.04, num_leaves=31, max_depth=6, min_child_samples=120, class_weight='balanced', eval_metric='average_precision'`) than the canonical static training script [`src/models/train_models.py`](src/models/train_models.py) (`n_estimators=300, learning_rate=0.05, num_leaves=31, max_depth=-1, min_child_samples=50`, no `class_weight`, `eval_metric='binary_logloss'`), and `Static LightGBM` was refit with those same parameters instead of loading the frozen `.joblib` artifact (while in the first WF commit `58628f8`, `Static Initial Train` on Volunteer used `volunteer_lightgbm_adaptive.joblib` trained on `naive_as_is`). After aligning `fit_fold_lightgbm` to match `train_models.py` and switching `Static Initial Train` to [`models/volunteer_lightgbm_adaptive_fixed_d.joblib`](models/volunteer_lightgbm_adaptive_fixed_d.joblib) ($p^*=0.1131$), the conclusion for `LightGBM (Set C) [WF Rolling 12m]` on Volunteer changed from statistical parity with `Adaptive 14-day` to statistically significantly outperforming it:
 
-#### Table 4.2. Initial Run vs. Aligned Run on Volunteer (`naive_fixed_D`, 4 rows from CSV)
+#### Table 4.2. Initial Run vs. Aligned Run on Volunteer (`naive_fixed_D`, [`reports/volunteer/volunteer_walk_forward_details.json`](reports/volunteer/volunteer_walk_forward_details.json))
 
-| Evaluation Slice (`Volunteer, naive_fixed_D`) | Model (`Set C`) | Initial Run (unaligned WF hyperparams; Static from `naive_as_is`): Pooled PR-AUC [95% CI] & $\Delta$ vs. Adaptive | Aligned Run (`train_models.py` hyperparams; Static `fixed_d`): Pooled PR-AUC [95% CI] & $\Delta$ vs. Adaptive |
+| Evaluation Slice (`Volunteer, naive_fixed_D`) | Model (`Set C`) | Pre-Commit Run (unaligned WF hyperparams) / Commit `58628f8` (`Static` from `as_is`): Pooled PR-AUC [95% CI] & $\Delta$ vs. Adaptive | Aligned Run (`train_models.py` hyperparams; `Static` from `fixed_d.joblib`): Pooled PR-AUC [95% CI] & $\Delta$ vs. Adaptive |
 | :--- | :--- | :--- | :--- |
-| **Full Test** (`2025-06` — `2026-10`, `256,490` rows) | **LightGBM (Set C) [WF Rolling 12m]** | `0.3885 [0.380, 0.397]`<br>$\Delta = -0.0038 \ [-0.0086, +0.0007]$ *(trailed Adaptive)* | **`0.4050 [0.397, 0.413]`**<br>**$\Delta = +0.0128 \ [+0.0082, +0.0168]$** *(beats Adaptive)* |
-| **Full Test** (`2025-06` — `2026-10`, `256,490` rows) | **LightGBM (Set C) [Static Initial Train]** | `0.3886 [0.381, 0.395]` (`as_is` on `fixed_D` grid)<br>$\Delta = -0.0037 \ [-0.0081, +0.0005]$ | **`0.3902 [0.383, 0.397]`** (`fixed_d.joblib`)<br>$\Delta = -0.0019 \ [-0.0065, +0.0024]$ |
-| **Latest 60 Days** (`2026-08-12` — `2026-10-11`, `30,347` rows) | **LightGBM (Set C) [WF Rolling 12m]** | *(not saved in git history; earlier draft figure `0.4793` / $\Delta = -0.0017$ was from memory and unverified)* | **`0.4975 [0.486, 0.512]`**<br>**$\Delta = +0.0167 \ [+0.0089, +0.0252]$** *(beats Adaptive)* |
-| **Latest 60 Days** (`2026-08-12` — `2026-10-11`, `30,347` rows) | **LightGBM (Set C) [Static Initial Train]** | `0.4530 [0.439, 0.471]` (`as_is` on `fixed_D` grid)<br>$\Delta = -0.0277 \ [-0.0376, -0.0172]$ | **`0.4546 [0.440, 0.472]`** (`fixed_d.joblib`)<br>$\Delta = -0.0262 \ [-0.0360, -0.0156]$ |
+| **Full Test** (`2025-06` — `2026-10`, `256,490` rows) | **LightGBM (Set C) [WF Rolling 12m]** | Pre-commit: `0.3935 [0.385, 0.401]`<br>$\Delta = +0.0012 \ [-0.0040, +0.0067]$ *(parity with Adaptive)* | **`0.4050 [0.397, 0.413]`**<br>**$\Delta = +0.0128 \ [+0.0082, +0.0168]$** *(beats Adaptive)* |
+| **Full Test** (`2025-06` — `2026-10`, `256,490` rows) | **LightGBM (Set C) [Static Initial Train]** | Pre-commit: `0.3684 [0.360, 0.377]`, $\Delta = -0.0239 \ [-0.0285, -0.0194]$<br>Commit `58628f8` (`as_is.joblib`): `0.3881 [0.381, 0.395]`, $\Delta = -0.0040 \ [-0.0085, +0.0004]$ | **`0.3902 [0.383, 0.397]`** (`fixed_d.joblib`)<br>$\Delta = -0.0019 \ [-0.0065, +0.0024]$ |
+| **Latest 60 Days** (`2026-08-12` — `2026-10-11`, `30,347` rows) | **LightGBM (Set C) [WF Rolling 12m]** | Pre-commit: `0.4933 [0.480, 0.509]`<br>$\Delta = +0.0125 \ [+0.0042, +0.0215]$ | **`0.4975 [0.486, 0.512]`**<br>**$\Delta = +0.0167 \ [+0.0089, +0.0252]$** *(beats Adaptive)* |
+| **Latest 60 Days** (`2026-08-12` — `2026-10-11`, `30,347` rows) | **LightGBM (Set C) [Static Initial Train]** | Pre-commit: `0.4261 [0.415, 0.440]`, $\Delta = -0.0548 \ [-0.0641, -0.0449]$<br>Commit `58628f8` (`as_is.joblib`): `0.4519 [0.438, 0.468]`, $\Delta = -0.0290 \ [-0.0390, -0.0182]$ | **`0.4546 [0.440, 0.472]`** (`fixed_d.joblib`)<br>$\Delta = -0.0262 \ [-0.0360, -0.0156]$ |
 
-> **Note on Intermediate Drafts:** The numbers `0.4094` and `0.4793` ($\Delta = -0.0017$) mentioned in intermediate draft notes were recalled from memory, have no confirmation in git history, and have been removed from all reports.
+> **Note on Intermediate Drafts:** The numbers `0.4094` and `0.4793` ($\Delta = -0.0017$) mentioned in intermediate draft notes were recalled from memory, have no confirmation in CSVs or git history, and are explicitly noted as unverified.
 
 ---
 
 ## 🗺️ 5. Regional Walk-Forward Breakdown Across 24 Oblasts (Exploratory)
 
-[`src/models/analyze_walk_forward_regional.py`](src/models/analyze_walk_forward_regional.py) decomposes out-of-fold Walk-Forward predictions across all **24 oblasts of Ukraine** without excluding any region by sample threshold (`reports/comparison/official_vs_volunteer_walk_forward_regional.csv`, `reports/comparison/official_vs_volunteer_walk_forward_regional_clusters.csv`):
+[`src/models/analyze_walk_forward_regional.py`](src/models/analyze_walk_forward_regional.py) decomposes out-of-fold Walk-Forward predictions across all **24 oblasts of Ukraine** without excluding any region by sample threshold ([`reports/comparison/official_vs_volunteer_walk_forward_regional.csv`](reports/comparison/official_vs_volunteer_walk_forward_regional.csv), [`reports/comparison/official_vs_volunteer_walk_forward_regional_clusters.csv`](reports/comparison/official_vs_volunteer_walk_forward_regional_clusters.csv)):
 * **Methodological Status (`exploratory`):** Because `24 oblasts × 2 sources = 48` subsets are evaluated simultaneously (multiple comparisons), this regional breakdown is strictly descriptive (`exploratory`) and makes no claims of statistical significance for individual oblasts.
 * **Why Only Paired Within-Oblast Differences $\Delta\text{PR-AUC}$ Are Comparable Across Regions:** Raw within-oblast `PR-AUC` mechanically depends on the local `base_rate` (which ranges from `1.3%–1.5%` in Zakarpattia and Ivano-Frankivsk to `47%–60%` in Kharkiv, Sumy, and Donetsk). Therefore, only **paired within-oblast gains** $\Delta\text{PR-AUC (WF − Static)}$ and $\Delta\text{PR-AUC (WF − Adaptive)}$ (Day-Block Bootstrap $N=500$, `seed=42`, `date_kyiv` derived from `timestamp_utc`) are meaningful across regions.
 * **Small-Sample Flag (`low_sample_flag = True` when `n_positives < 150` or `n_calm_hours < 1500`):** All 24 oblasts are retained; the flag marks **3 oblasts on Official** (Donetsk: `1,037` calm hours, `623` onsets; Dnipropetrovsk: `1,338` hours, `137` onsets; Zakarpattia: `10,852` hours, `147` onsets) and **1 oblast on Volunteer** (Zakarpattia: `11,630` hours, `147` onsets).
 * **Grouping Strictly by Train-Only Clusters (`активність 2022–04.2024`):**
 
-### Table 5.1. Regional Walk-Forward Gains Aggregated by Train-Only Clusters (`reports/comparison/official_vs_volunteer_walk_forward_regional_clusters.csv`)
+### Table 5.1. Regional Walk-Forward Gains Aggregated by Train-Only Clusters ([`reports/comparison/official_vs_volunteer_walk_forward_regional_clusters.csv`](reports/comparison/official_vs_volunteer_walk_forward_regional_clusters.csv))
 
 | Dataset | Train-Only Cluster (`активність 2022–04.2024`) | Oblasts (`low_sample`) | Mean `base_rate` | Median PR-AUC: Adapt / Static / WF 12m | Mean / Median $\Delta\text{PR-AUC (WF − Static)}$ | Mean / Median $\Delta\text{PR-AUC (WF − Adapt)}$ | Oblasts with $\Delta_{\text{WF−Static}} > 0$ | Oblasts with $\Delta_{\text{WF−Adapt}} > 0$ |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -369,25 +374,26 @@ In the initial (pre-commit) run of [`src/models/run_walk_forward_experiment.py`]
 
 ## 🛡️ 6. Causal Invariance Verification, Limitations & Future Work
 
-### 6.1. Five-Tier Causal Invariance Automated Test (`tests/test_leakage_invariance.py`)
-[`tests/test_leakage_invariance.py`](tests/test_leakage_invariance.py) verifies zero future information leakage across 5 tiers:
+### 6.1. Six-Tier Causal Invariance Automated Test ([`tests/test_leakage_invariance.py`](tests/test_leakage_invariance.py))
+[`tests/test_leakage_invariance.py`](tests/test_leakage_invariance.py) verifies zero future information leakage across 6 tiers:
 
 | Verification Tier | What Is Tested | Passing Criterion (`PASS`) |
 | :--- | :--- | :--- |
-| **1. Grid & Feature Set Integrity** | Zero duplicates in `alerts_clean_oblast.parquet` and `ml_features_hourly.parquet`, and exact column schemas of `Set A` (10), `Set B` (13), `Set C` (22), `Set C'` (19), and `Set D` (30 features) | `assert duplicates == 0` and exact column match |
-| **2. Future Truncation Invariance of Feature Store at $119$ Timestamps $T$** | Across $19$ boundary timestamps (grid start, rolling window boundaries $6\text{h}/24\text{h}/7\text{d}/14\text{d}/30\text{d}$, Train/Val/Test split boundaries) + $100$ random timestamps $T$ (`2,399` region-hour rows), all alerts with `started_at > T` are deleted and `finished_at > T` is masked (`NaT`) | Exact agreement between recomputed `is_active_T == 0` and all features in Sets A, B, C, C' vs. the saved Feature Store (`max_diff < 1e-6`) |
-| **3. Target Window $[T, T + 1\text{h})$ Dependence** | Verifies `target_onset_next_1h` across all $2,399$ test rows | Exact match with binary onset indicator strictly within the half-open interval $[T, T + 1\text{h})$ |
-| **4. Raw Cleaner Truncation Invariance (`cleaner.py` & `volunteer_cleaner.py`)** | Physical truncation of raw CSVs at checkpoints $T$: verifies deduplication, interval merging, and causal `naive_fixed_D` imputation (where medians $D_{\text{oblast}}$ are estimated strictly on `Train <= 2024-04-30` with censoring at `train_end`) | Zero changes to any interval completed by moment $T$ (`finished_at <= T`) when future raw rows are removed |
-| **5. Astronomical Block `Set D` & Walk-Forward `embargo`** | Determinism of the 8 astronomical/calendar features in `Set D` under truncation and verification of the 2-hour `embargo_hours = 2` buffer between `Train_M`, `Val_M`, and test month $M$ | Zero overlap of target windows $[T, T+1\text{h})$ across training, validation, and test splits in every fold |
+| **1. Grid & Feature Set Integrity** | Zero duplicates in `alerts_clean_oblast.parquet`, `ml_features_hourly.parquet`, `volunteer_alerts_clean_*.parquet`, `volunteer_ml_features_hourly_*.parquet`, and `walk_forward_oof_predictions_*.parquet`, and exact column schemas of `Set A` (10), `Set B` (13), `Set C` (22), `Set C'` (19), and `Set D` (25 features) | `assert duplicates == 0` and exact column match |
+| **2. Train-Only Clusters Truncation Invariance** | Physical truncation of `alerts_clean_oblast.parquet` and `volunteer_alerts_clean_*.parquet` at `2024-04-30 23:59:59 UTC` with censoring of `finished_at` at `train_end`, followed by re-running `generate_train_only_clusters()` | Bit-for-bit match of cluster IDs and all 6 cluster passport metrics against `clusters_train_only.csv` and `volunteer_clusters_train_only*.csv` |
+| **3. Future Truncation Invariance of Feature Store at $119$ Timestamps $T$** | Across $19$ boundary timestamps (grid start, rolling window boundaries $6\text{h}/24\text{h}/7\text{d}/14\text{d}/30\text{d}$, Train/Val/Test split boundaries) + $100$ random timestamps $T$ (`2,399` region-hour rows on Official and `2,465` on Volunteer `naive_fixed_D`), all alerts with `started_at > T` are deleted and `finished_at > T` is masked (`NaT`) | Exact agreement between recomputed `is_active_T == 0` and all features in Sets A, B, C, C', D vs. the saved Feature Store (`max_diff < 1e-6`) |
+| **4. Target Window $[T, T + 1\text{h})$ Dependence** | Verifies `target_onset_next_1h` across all test rows on both datasets | Exact match with binary onset indicator strictly within the half-open interval $[T, T + 1\text{h})$ |
+| **5. Causal `naive_fixed_D` Medians in `cleaner.py`** | Physical truncation of raw `volunteer_data_uk.csv` at `2024-04-30 23:59:59 UTC` with censoring of `finished_at` at `train_end` inside `compute_train_median_durations_volunteer()` | Exact match of $D_{\text{oblast}}$ across all 24 regions when `Val + Test` rows are removed |
+| **6. Walk-Forward Split, `embargo` & Saved OOF Invariance** | Verifies the 2-hour `embargo_hours = 2` buffer between `Train_M`, `Val_M`, and test month $M$, weight invariance when corrupting all rows $\ge T_{\text{start}}(M) - 1\text{h}$, `SHA-256` verification, and exact reproduction of saved `p_roll_lgb_c` when trained on data physically truncated at $T_{\text{start}}(M) - 2\text{h}$ | Zero overlap of target windows $[T, T+1\text{h})$ and exact match of saved OOF Parquets against models trained on strictly truncated past data |
 
 ### 6.2. Methodological Limitations & Caveats
-1. **Strict Separation of Pre-Specified vs. Post-Hoc Hypotheses:** The primary pre-specified comparison in the static block was `LightGBM (Set C)` vs. `Adaptive 14-day Rolling`. Identifying static `Set B` as top-performing by PR-AUC, constructing `Set C'`, adding the astronomical extension `Set D`, and formulating the `Walk-Forward Retraining` block (`primary hypothesis of the WF block (specified after viewing static Test results)`) were done after viewing static Test results.
+1. **Strict Separation of Pre-Specified vs. Post-Hoc Hypotheses:** The primary pre-specified comparison in the static block was `LightGBM (Set C)` vs. `Adaptive 14-day Rolling`. Identifying static `Set B` as top-performing by PR-AUC, constructing `Set C'`, adding the relative activity ratios `Set D (+Rel Ratios)`, and formulating the `Walk-Forward Retraining` block (`primary hypothesis of the WF block (specified after viewing static Test results)`) were done after viewing static Test results.
 2. **Multiple Comparisons & `base_rate` Dependence in Regional Breakdown:** Evaluating 24 oblasts across two sources (`48` slices) is strictly `exploratory`. Raw within-oblast `PR-AUC` depends mechanically on regional `base_rate`, so only paired within-oblast differences $\Delta\text{PR-AUC}$ are meaningful across regions.
 3. **Sub-Regional Aggregation After 2025-08-01 on Official:** Reconstructing oblast alerts as the union of all district intervals preserves series continuity after the August 2025 logging reform, but reduces calm hours in frontline oblasts (notably Donetsk and Dnipropetrovsk on Official, which are flagged with `low_sample_flag = True`).
 4. **Boundary Effect of the 60-Second Micro-Alert Filter:** For an alert that started less than 60 seconds before $T$ and is still ongoing at $T$, retrospective filtering relies on whether its final duration reaches 60 seconds (affecting $< 0.05\%$ of grid hours).
 
 ### 6.3. 🔭 Future Work: Meteorological Forecast Features (Open-Meteo Weather Forecasts)
-In this study, we intentionally restricted features to endogenous spatio-temporal alert dynamics and deterministic astronomical cycles (`Set D`), leaving meteorological forecast integration for **Future Work** due to the following causality and historical coverage constraints:
+In this study, we intentionally restricted features to endogenous spatio-temporal alert dynamics and relative activity ratios (`Set D`), leaving meteorological forecast integration for **Future Work** due to the following causality and historical coverage constraints:
 1. **Causality and Historical Depth Constraints of NWP Archives (Open-Meteo `Historical Forecast` vs. `Previous Runs`):**
    * Using reanalysis observations (`ERA5`) over $[T, T+1\text{h})$ introduces direct future leakage, whereas using only past observations up to $T$ omits synoptic forecast trajectories for the upcoming hour.
    * **`Open-Meteo Historical Forecast API` (Single Runs)** stitches the initial hours of consecutive NWP model runs without preserving the exact forecast state available after accounting for real-world publication delay (`model availability lag`, typically 3–6 hours after the `00z/06z/12z/18z` initialization time).
@@ -410,112 +416,235 @@ pip install -r requirements.txt
 ```
 
 ### 2. Full End-to-End Reproducible Run (`bash run_all.sh`)
-[`run_all.sh`](run_all.sh) sequentially executes all 9 stages of the pipeline from scratch (Official & Volunteer cleaning, RQ1–RQ3, Feature Store generation, static training, Walk-Forward Retraining, 24-oblast regional breakdown, automated verification/leakage tests, and execution of all 5 Jupyter Notebooks):
+[`run_all.sh`](run_all.sh) sequentially executes all 9 stages of the pipeline from scratch (upstream SHA-256 verification, Official & Volunteer cleaning, cross-source interval comparison, RQ1–RQ3, Feature Store generation, static training, Volunteer experiments, Walk-Forward Retraining and 24-oblast regional breakdown, execution of all 5 Jupyter Notebooks, and automated verification/leakage tests):
 ```bash
 bash run_all.sh
 ```
-Or step by step:
+Or step by step (matching [`run_all.sh`](run_all.sh) 1-to-1):
 ```bash
-# [1/9] Stage 1 (Official): Cleaning, cyclicity (RQ1), clustering (RQ2 + Train-only), and cross-correlations (RQ3)
+# [1/9] Verify raw data sources (SHA-256 hashes and duplicate block structure)
+python src/data/verify_upstream_source.py
+
+# [2/9] Clean and merge intervals (Official + Volunteer: naive_as_is, drop_naive, naive_fixed_D)
 python src/data/cleaner.py
+
+# [3/9] Compare Official vs. Volunteer interval counts and durations
+python src/data/compare_official_vs_volunteer.py
+
+# [4/9] Stage 1 exploratory modules RQ1–RQ3 and Train-only clusters (Official)
 python src/features/cyclicity.py
 python src/features/clustering.py
 python src/features/propagation.py
 
-# [2/9–3/9] Stage 2 (Official): Feature Store, feature shift, baselines, static models (A, B, C, C'), and Test evaluation
+# [5/9] Generate Feature Store and analyze covariate shift (Official)
 python src/features/feature_store.py
 python src/features/analyze_feature_shift.py
+
+# [6/9] Train baselines, static models (A, B, C, C'), and evaluate on Test with Day-Block Bootstrap N=500 (Official)
 python src/models/baselines.py
 python src/models/train_models.py
 python src/models/evaluate_test.py
 
-# [4/9–5/9] Independent Volunteer verification (3 naive policies: as_is, drop_naive, fixed_D) and cross-source comparison
-python src/models/run_volunteer_pipeline.py
-python src/models/compare_datasets.py
-
-# [6/9–7/9] Monthly Walk-Forward Retraining (Rolling 12m & Expanding) and 24-oblast regional breakdown
+# [7/9] Full Volunteer experiment (3 naive policies), cross-source comparison, Walk-Forward, and 24-oblast regional breakdown
+python src/models/run_volunteer_experiment.py
+python src/models/compare_official_vs_volunteer_metrics.py
 python src/models/run_walk_forward_experiment.py
 python src/models/analyze_walk_forward_regional.py
 
-# [8/9] Artifact integrity verification across all 33 figures/tables and 5-tier causal invariance test
-python tests/verify_pipeline.py
+# [8/9] Execute all 5 Jupyter Notebooks from scratch (Restart & Run All)
+jupyter nbconvert --to notebook --execute --inplace \
+    notebooks/01_data_profiling_and_cleaning.ipynb \
+    notebooks/02_rq1_temporal_cyclicity.ipynb \
+    notebooks/03_rq2_regional_clustering.ipynb \
+    notebooks/04_rq3_spatial_propagation_routes.ipynb \
+    notebooks/05_ml_forecasting_experiment.ipynb
+
+# [9/9] Run 6-tier causal invariance test and artifact verification across all 33 figures and tables
 python tests/test_leakage_invariance.py
+python tests/verify_pipeline.py
 ```
 
 ### 3. Research Jupyter Notebooks
 * [`notebooks/01_data_profiling_and_cleaning.ipynb`](notebooks/01_data_profiling_and_cleaning.ipynb) — Raw data profiling for Official and Volunteer, duplicate block audit, deduplication, and interval merging.
 * [`notebooks/02_rq1_temporal_cyclicity.ipynb`](notebooks/02_rq1_temporal_cyclicity.ipynb) — Weekly/diurnal rhythms, nocturnal alert shares, and Kruskal-Wallis tests across both sources.
 * [`notebooks/03_rq2_regional_clustering.ipynb`](notebooks/03_rq2_regional_clustering.ipynb) — Descriptive hierarchical clustering (RQ2) vs. isolated Train-only ML clusters.
-* [`notebooks/04_rq3_spatial_propagation_routes.ipynb`](notebooks/04_rq3_spatial_propagation_routes.ipynb) — Cross-correlations and lead-lag delays across 49 neighbor pairs ($\rho = 0.960$ cross-source agreement).
+* [`notebooks/04_rq3_spatial_propagation_routes.ipynb`](notebooks/04_rq3_spatial_propagation_routes.ipynb) — Cross-correlations and lead-lag delays across 49 neighbor pairs.
 * [`notebooks/05_ml_forecasting_experiment.ipynb`](notebooks/05_ml_forecasting_experiment.ipynb) — Static ML benchmark, covariate shift analysis, `naive` sensitivity, monthly Walk-Forward Retraining, hyperparameter alignment history, and 24-oblast regional breakdown.
 
 ---
 
 ## 📁 8. Repository Structure
 
+Below is the complete, exact tree of all files tracked in the repository (one file per line, matching `git ls-files` 1-to-1):
+
 ```
+├── .gitignore
+├── LICENSE
+├── README.md
+├── README_EN.md
+├── requirements.txt
+├── run_all.sh
 ├── data/
 │   ├── raw/
-│   │   ├── official_data_uk.csv                                      # Raw Official dataset (299,275 rows, SHA-256 verified)
-│   │   └── volunteer_data_uk.csv                                     # Raw Volunteer dataset (709,225 rows, SHA-256 verified)
+│   │   ├── official_data_en.csv
+│   │   ├── official_data_uk.csv
+│   │   └── volunteer_data_uk.csv
 │   └── processed/
-│       ├── alerts_clean_oblast.parquet                               # Merged Official intervals (84,908 rows)
-│       ├── ml_features_hourly.parquet                                # Official Feature Store (797,428 calm hours)
-│       ├── volunteer_alerts_clean_{as_is,drop_naive,fixed_d}.parquet # Cleaned Volunteer intervals (3 naive policies)
-│       ├── volunteer_ml_features_hourly_{as_is,drop_naive,fixed_d}.parquet
-│       ├── walk_forward_oof_predictions_official.parquet             # Out-of-fold WF predictions Official (197,083 rows)
-│       └── walk_forward_oof_predictions_volunteer_fixed_d.parquet    # Out-of-fold WF predictions Volunteer (256,490 rows)
-├── models/                                                           # Frozen models (*.joblib) and thresholds (*thresholds*.json)
-├── notebooks/                                                        # 5 executed Jupyter Notebooks (01..05)
+│       ├── alerts_clean_oblast.parquet
+│       ├── ml_features_hourly.parquet
+│       ├── volunteer_alerts_clean_as_is.parquet
+│       ├── volunteer_alerts_clean_drop_naive.parquet
+│       ├── volunteer_alerts_clean_fixed_d.parquet
+│       ├── volunteer_ml_features_hourly_as_is.parquet
+│       ├── volunteer_ml_features_hourly_drop_naive.parquet
+│       ├── volunteer_ml_features_hourly_fixed_d.parquet
+│       ├── walk_forward_oof_predictions_official.parquet
+│       └── walk_forward_oof_predictions_volunteer_fixed_d.parquet
+├── models/
+│   ├── lightgbm_adaptive.joblib
+│   ├── lightgbm_c_prime.joblib
+│   ├── lightgbm_nospatial.joblib
+│   ├── lightgbm_spatial.joblib
+│   ├── logreg_adaptive.joblib
+│   ├── logreg_c_prime.joblib
+│   ├── logreg_nospatial.joblib
+│   ├── logreg_spatial.joblib
+│   ├── optimal_thresholds.json
+│   ├── scaler_adaptive.joblib
+│   ├── scaler_c_prime.joblib
+│   ├── scaler_nospatial.joblib
+│   ├── scaler_spatial.joblib
+│   ├── volunteer_lightgbm_adaptive.joblib
+│   ├── volunteer_lightgbm_adaptive_fixed_d.joblib
+│   ├── volunteer_lightgbm_c_prime.joblib
+│   ├── volunteer_lightgbm_nospatial.joblib
+│   ├── volunteer_lightgbm_spatial.joblib
+│   ├── volunteer_optimal_thresholds.json
+│   └── volunteer_optimal_thresholds_fixed_d.json
+├── notebooks/
+│   ├── 01_data_profiling_and_cleaning.ipynb
+│   ├── 02_rq1_temporal_cyclicity.ipynb
+│   ├── 03_rq2_regional_clustering.ipynb
+│   ├── 04_rq3_spatial_propagation_routes.ipynb
+│   └── 05_ml_forecasting_experiment.ipynb
 ├── reports/
-│   ├── official/                                                     # Tables, JSONs, and 13 figures for Official dataset
-│   │   ├── figures/                                                  # 13 main figures (01..13) + 20..22_astronomical_*
-│   │   ├── regional_clusters_summary.csv, clusters_train_only.csv
-│   │   ├── spatial_lead_lag_summary.csv, feature_shift_summary.csv
-│   │   ├── baselines_benchmark.csv, ml_validation_benchmark.csv
-│   │   ├── ml_models_benchmark.csv, ml_recent_60d_benchmark.csv
-│   │   ├── ml_test_pre_aug2025_benchmark.csv, ml_test_post_aug2025_benchmark.csv
-│   │   ├── walk_forward_overall_benchmark.csv, walk_forward_recent_60d_benchmark.csv
-│   │   ├── walk_forward_monthly_metrics.csv, walk_forward_regional_breakdown.csv
-│   │   └── val_evaluation_details.json, test_evaluation_details.json, walk_forward_details.json
-│   ├── volunteer/                                                    # Tables, JSONs, and 13 figures for Volunteer dataset
-│   │   ├── figures/                                                  # 13 main figures (01..13) + 20..22_astronomical_*
-│   │   ├── volunteer_train_median_durations.csv, volunteer_naive_sensitivity.csv
-│   │   ├── volunteer_ml_models_benchmark.csv, volunteer_ml_recent_60d_benchmark.csv
-│   │   ├── volunteer_walk_forward_overall_benchmark.csv, volunteer_walk_forward_recent_60d_benchmark.csv
-│   │   ├── volunteer_walk_forward_monthly_metrics.csv, volunteer_walk_forward_regional_breakdown.csv
-│   │   └── volunteer_val_evaluation_details.json, volunteer_test_evaluation_details.json, volunteer_walk_forward_details.json
-│   └── comparison/                                                   # Cross-source summary tables and 7 comparison figures
-│       ├── figures/                                                  # Figures 14..20 (Official vs Volunteer, naive, WF, 24 oblasts)
+│   ├── official/
+│   │   ├── figures/
+│   │   │   ├── 01_heatmap_24x7.png
+│   │   │   ├── 02_hourly_evolution_by_year.png
+│   │   │   ├── 03_duration_distribution.png
+│   │   │   ├── 04_clustering_metrics_evaluation.png
+│   │   │   ├── 05_regional_dendrogram.png
+│   │   │   ├── 06_spatial_cross_correlation_routes.png
+│   │   │   ├── 07_baselines_performance.png
+│   │   │   ├── 08_ml_pr_curves_validation.png
+│   │   │   ├── 09_threshold_tuning_f2.png
+│   │   │   ├── 10_test_pr_curves_comparison.png
+│   │   │   ├── 11_feature_importance_lightgbm.png
+│   │   │   ├── 12_lift_over_baselines.png
+│   │   │   └── 13_calibration_reliability_diagram.png
+│   │   ├── baselines_benchmark.csv
+│   │   ├── clusters_train_only.csv
+│   │   ├── feature_importance_lightgbm.csv
+│   │   ├── feature_shift_summary.csv
+│   │   ├── feature_shift_test_subperiods.csv
+│   │   ├── ml_models_benchmark.csv
+│   │   ├── ml_recent_60d_benchmark.csv
+│   │   ├── ml_test_post_aug2025_benchmark.csv
+│   │   ├── ml_test_pre_aug2025_benchmark.csv
+│   │   ├── ml_validation_benchmark.csv
+│   │   ├── regional_clusters_summary.csv
+│   │   ├── spatial_lead_lag_summary.csv
+│   │   ├── test_evaluation_details.json
+│   │   ├── val_evaluation_details.json
+│   │   ├── walk_forward_details.json
+│   │   ├── walk_forward_monthly_metrics.csv
+│   │   ├── walk_forward_overall_benchmark.csv
+│   │   ├── walk_forward_recent_60d_benchmark.csv
+│   │   └── walk_forward_regional_breakdown.csv
+│   ├── volunteer/
+│   │   ├── figures/
+│   │   │   ├── 01_heatmap_24x7.png
+│   │   │   ├── 02_hourly_evolution_by_year.png
+│   │   │   ├── 03_duration_distribution.png
+│   │   │   ├── 04_clustering_metrics_evaluation.png
+│   │   │   ├── 05_regional_dendrogram.png
+│   │   │   ├── 06_spatial_cross_correlation_routes.png
+│   │   │   ├── 07_baselines_performance.png
+│   │   │   ├── 08_ml_pr_curves_validation.png
+│   │   │   ├── 09_threshold_tuning_f2.png
+│   │   │   ├── 10_test_pr_curves_comparison.png
+│   │   │   ├── 11_feature_importance_lightgbm.png
+│   │   │   ├── 12_lift_over_baselines.png
+│   │   │   └── 13_calibration_reliability_diagram.png
+│   │   ├── baselines_benchmark.csv
+│   │   ├── clusters_train_only.csv
+│   │   ├── regional_clusters_summary.csv
+│   │   ├── spatial_lead_lag_summary.csv
+│   │   ├── volunteer_clusters_train_only.csv
+│   │   ├── volunteer_clusters_train_only_drop_naive.csv
+│   │   ├── volunteer_clusters_train_only_fixed_d.csv
+│   │   ├── volunteer_evaluation_details.json
+│   │   ├── volunteer_feature_importance_lightgbm.csv
+│   │   ├── volunteer_feature_shift_summary.csv
+│   │   ├── volunteer_feature_shift_test_subperiods.csv
+│   │   ├── volunteer_ml_models_benchmark.csv
+│   │   ├── volunteer_ml_recent_60d_benchmark.csv
+│   │   ├── volunteer_ml_test_post_aug2025_benchmark.csv
+│   │   ├── volunteer_ml_test_pre_aug2025_benchmark.csv
+│   │   ├── volunteer_ml_validation_benchmark.csv
+│   │   ├── volunteer_naive_sensitivity.csv
+│   │   ├── volunteer_naive_sensitivity.json
+│   │   ├── volunteer_train_median_durations.csv
+│   │   ├── volunteer_walk_forward_details.json
+│   │   ├── volunteer_walk_forward_monthly_metrics.csv
+│   │   ├── volunteer_walk_forward_overall_benchmark.csv
+│   │   ├── volunteer_walk_forward_recent_60d_benchmark.csv
+│   │   └── volunteer_walk_forward_regional_breakdown.csv
+│   └── comparison/
+│       ├── figures/
+│       │   ├── 14_comparison_pr_auc_official_vs_volunteer.png
+│       │   ├── 15_comparison_f2_official_vs_volunteer.png
+│       │   ├── 16_comparison_feature_shift_official_vs_volunteer.png
+│       │   ├── 17_comparison_alert_counts_and_durations.png
+│       │   ├── 18_volunteer_naive_sensitivity_comparison.png
+│       │   ├── 19_walk_forward_vs_static_comparison.png
+│       │   └── 20_walk_forward_regional_breakdown.png
 │       ├── official_vs_volunteer_comparison.csv
-│       ├── official_vs_volunteer_ml_metrics_comparison.csv
+│       ├── official_vs_volunteer_comparison.json
 │       ├── official_vs_volunteer_feature_shift_comparison.csv
+│       ├── official_vs_volunteer_ml_metrics_comparison.csv
 │       ├── official_vs_volunteer_walk_forward_comparison.csv
 │       ├── official_vs_volunteer_walk_forward_regional.csv
 │       ├── official_vs_volunteer_walk_forward_regional_clusters.csv
-│       └── official_vs_volunteer_comparison.json, upstream_source_verification.json
+│       └── upstream_source_verification.json
 ├── src/
+│   ├── __init__.py
 │   ├── data/
-│   │   ├── cleaner.py                                                # Official deduplication and interval merging
-│   │   └── volunteer_cleaner.py                                      # Causal Volunteer cleaning (as_is, drop_naive, fixed_D)
+│   │   ├── __init__.py
+│   │   ├── cleaner.py
+│   │   ├── compare_official_vs_volunteer.py
+│   │   └── verify_upstream_source.py
 │   ├── features/
-│   │   ├── cyclicity.py, clustering.py, propagation.py               # RQ1–RQ3 analytics and Train-only cluster generation
-│   │   ├── feature_store.py                                          # Hourly Feature Store generator (Sets A, B, C, C')
-│   │   ├── astronomical_features.py                                  # Deterministic astronomical and calendar features (Set D)
-│   │   └── analyze_feature_shift.py                                  # Feature distribution shift analysis (Train/Val/Test)
-│   └── models/
-│       ├── baselines.py, train_models.py, evaluate_test.py           # Static model training and evaluation (Day-Block Bootstrap)
-│       ├── run_volunteer_pipeline.py, compare_datasets.py            # Volunteer pipeline and cross-source comparison
-│       ├── run_walk_forward_experiment.py                            # Monthly Walk-Forward Retraining with 2h embargo buffer
-│       └── analyze_walk_forward_regional.py                          # Regional 24-oblast Walk-Forward breakdown
-├── tests/
-│   ├── verify_pipeline.py                                            # Artifact integrity check across all tables and 33 figures
-│   └── test_leakage_invariance.py                                    # 5-tier causal truncation invariance test
-├── run_all.sh                                                        # End-to-end reproducible pipeline runner from scratch
-├── requirements.txt                                                  # Python dependencies
-├── LICENSE                                                           # MIT License
-├── README.md                                                         # Ukrainian documentation (Default)
-└── README_EN.md                                                      # English documentation
+│   │   ├── __init__.py
+│   │   ├── analyze_feature_shift.py
+│   │   ├── clustering.py
+│   │   ├── cyclicity.py
+│   │   ├── feature_store.py
+│   │   └── propagation.py
+│   ├── models/
+│   │   ├── analyze_walk_forward_regional.py
+│   │   ├── baselines.py
+│   │   ├── compare_official_vs_volunteer_metrics.py
+│   │   ├── evaluate_test.py
+│   │   ├── run_volunteer_experiment.py
+│   │   ├── run_walk_forward_experiment.py
+│   │   └── train_models.py
+│   └── visualization/
+│       └── __init__.py
+└── tests/
+    ├── test_leakage_invariance.py
+    └── verify_pipeline.py
 ```
 
 ---
