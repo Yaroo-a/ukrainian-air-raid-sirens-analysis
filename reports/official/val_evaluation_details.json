@@ -3,7 +3,7 @@
   "val_total_days": 397,
   "val_positives": 19342,
   "val_base_rate": 0.10169562817108757,
-  "selection_rule": "arg max PR-AUC on Validation among pre-specified models (Sets A, B, C)",
+  "selection_rule": "arg max PR-AUC on Validation among candidate models (rule formulated after initial Test inspection) (Sets A, B, C)",
   "selected_model_on_val": "LightGBM (Set C: Spatial + Adaptive)",
   "selected_model_val_pr_auc": 0.30122521291593196,
   "selected_model_val_f2": 0.5330692266845533,

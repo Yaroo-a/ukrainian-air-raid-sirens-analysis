@@ -19,6 +19,7 @@
   "recent_60d_rows": 30438,
   "recent_60d_positives": 6749,
   "recent_60d_base_rate": 0.22172941717589856,
+  "selection_rule": "arg max PR-AUC on Validation among candidate models (rule formulated after initial Test inspection) (Sets A, B, C)",
   "selected_model_on_val": "LightGBM (Set C: Spatial + Adaptive)",
   "paired_day_bootstrap_500_val": {
     "PRIMARY_lgb_C_minus_adaptive_prauc": {
