@@ -78,11 +78,12 @@ ADJACENCY_PAIRS = [
 def analyze_spatial_propagation(
     parquet_path: str | Path,
     output_dir: str | Path,
-    time_step_min: int = 10,
+    time_step_min: int = 2,
+    onset_window_min: int = 10,
     max_lag_min: int = 180,
     nationwide_sync_threshold: int = 15,
 ) -> pd.DataFrame:
-    """Computes spatial cross-correlation and directional lead-times."""
+    """Computes spatial onset cross-correlation and directional wave lead-times on a 2-minute grid."""
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     figures_dir = out_dir / "figures"
@@ -92,32 +93,49 @@ def analyze_spatial_propagation(
     df = pd.read_parquet(parquet_path)
     clean_df = df[~df["is_occupied_extreme"] & df["is_finished"]].copy()
 
-    # --- 2. Discrete Grid ---
+    # --- 2. Discrete 2-Minute Grid & 10-Minute Alert Onset Impulse Windows ---
     min_time = clean_df["started_at"].min().floor("10min")
     max_time = clean_df["finished_at"].max().ceil("10min")
-    time_index = pd.date_range(start=min_time, end=max_time, freq=f"{time_step_min}min", tz="UTC")
-    n_steps = len(time_index)
+    n_steps = int((max_time - min_time).total_seconds() // (time_step_min * 60)) + 1
     oblasts = sorted(clean_df["oblast"].unique())
     oblast_to_idx = {o: i for i, o in enumerate(oblasts)}
 
-    grid_matrix = np.zeros((n_steps, len(oblasts)), dtype=np.int8)
-    for _, row in clean_df.iterrows():
-        o_idx = oblast_to_idx[row["oblast"]]
-        start_step = max(0, int((row["started_at"] - min_time).total_seconds() // (time_step_min * 60)))
-        end_step = min(n_steps - 1, int((row["finished_at"] - min_time).total_seconds() // (time_step_min * 60)))
-        if end_step >= start_step:
-            grid_matrix[start_step:end_step + 1, o_idx] = 1
+    active_grid = np.zeros((n_steps, len(oblasts)), dtype=np.int8)
+    onset_grid = np.zeros((n_steps, len(oblasts)), dtype=np.int8)
+    window_steps = max(1, onset_window_min // time_step_min)
 
-    # --- 3. Filter Synchronous Nationwide Events ---
-    simultaneous_active = grid_matrix.sum(axis=1)
+    start_steps = np.clip(
+        ((clean_df["started_at"] - min_time).dt.total_seconds() // (time_step_min * 60)).astype(int).values,
+        0,
+        n_steps - 1,
+    )
+    end_steps = np.clip(
+        ((clean_df["finished_at"] - min_time).dt.total_seconds() // (time_step_min * 60)).astype(int).values,
+        0,
+        n_steps - 1,
+    )
+    o_indices = clean_df["oblast"].map(oblast_to_idx).values
+
+    for s_step, e_step, o_idx in zip(start_steps, end_steps, o_indices):
+        if e_step >= s_step:
+            active_grid[s_step:e_step + 1, o_idx] = 1
+        onset_grid[s_step:min(n_steps, s_step + window_steps), o_idx] = 1
+
+    # --- 3. Filter Synchronous Nationwide Events (>= 15 oblasts active simultaneously) ---
+    simultaneous_active = active_grid.sum(axis=1)
     sync_mask = simultaneous_active >= nationwide_sync_threshold
-    local_grid = grid_matrix.copy()
-    local_grid[sync_mask, :] = 0
+    local_active_grid = active_grid.copy()
+    local_active_grid[sync_mask, :] = 0
+    local_onset_grid = onset_grid.copy()
+    local_onset_grid[sync_mask, :] = 0
 
-    # --- 4. Cross-Correlation for Adjacent Pairs ---
+    # --- 4. Cross-Correlation of Onset Impulses for Adjacent Pairs ---
     max_lags = max_lag_min // time_step_min
     lag_steps = np.arange(-max_lags, max_lags + 1)
     lag_minutes = lag_steps * time_step_min
+    pos_mask = lag_minutes > 0
+    neg_mask = lag_minutes < 0
+    pos_lags_min = lag_minutes[pos_mask]
 
     results = []
     for region_a, region_b in ADJACENCY_PAIRS:
@@ -126,50 +144,64 @@ def analyze_spatial_propagation(
         idx_a = oblast_to_idx[region_a]
         idx_b = oblast_to_idx[region_b]
 
-        series_a = local_grid[:, idx_a]
-        series_b = local_grid[:, idx_b]
+        series_a = local_onset_grid[:, idx_a].astype(np.float64)
+        series_b = local_onset_grid[:, idx_b].astype(np.float64)
 
-        std_a = np.std(series_a)
-        std_b = np.std(series_b)
-        if std_a == 0 or std_b == 0:
+        sa_centered = series_a - series_a.mean()
+        sb_centered = series_b - series_b.mean()
+        denom = float(np.sqrt(np.dot(sa_centered, sa_centered) * np.dot(sb_centered, sb_centered)))
+        if denom == 0.0:
             continue
 
-        corrs = []
-        for lag in lag_steps:
+        # Convention:
+        # lag > 0 means A at time t precedes B at time t + lag (A ➔ B): correlate series_a[:-lag] with series_b[lag:]
+        # lag < 0 means B precedes A by abs(lag) (B ➔ A): correlate series_a[-lag:] with series_b[:lag]
+        corrs = np.empty(len(lag_steps), dtype=np.float64)
+        for i_lag, lag in enumerate(lag_steps):
             if lag < 0:
-                c = np.corrcoef(series_a[:lag], series_b[-lag:])[0, 1]
+                corrs[i_lag] = np.dot(sa_centered[-lag:], sb_centered[:lag]) / denom
             elif lag > 0:
-                c = np.corrcoef(series_a[lag:], series_b[:-lag])[0, 1]
+                corrs[i_lag] = np.dot(sa_centered[:-lag], sb_centered[lag:]) / denom
             else:
-                c = np.corrcoef(series_a, series_b)[0, 1]
-            corrs.append(c)
+                corrs[i_lag] = np.dot(sa_centered, sb_centered) / denom
 
-        corrs = np.array(corrs)
-        best_idx = np.argmax(corrs)
+        best_idx = int(np.argmax(corrs))
         best_lag_min = int(lag_minutes[best_idx])
         max_corr = float(corrs[best_idx])
         corr_lag0 = float(corrs[len(lag_steps) // 2])
 
-        # Also calculate average lead-lag over positive and negative correlation shoulders
-        pos_shoulder = corrs[lag_minutes > 0].mean()
-        neg_shoulder = corrs[lag_minutes < 0].mean()
+        # Positive shoulder (tau in +2..+180 min, A ➔ B) vs Negative shoulder (tau in -180..-2 min, B ➔ A)
+        pos_corrs = corrs[pos_mask]
+        neg_corrs = corrs[neg_mask][::-1]  # aligned by +tau = 2, 4, ..., 180 min
+        pos_shoulder = float(pos_corrs.mean())
+        neg_shoulder = float(neg_corrs.mean())
         shoulder_diff = pos_shoulder - neg_shoulder
 
-        if best_lag_min > 0 or shoulder_diff > 0.01:
+        if shoulder_diff > 0.001:
             dominant_direction = f"{region_a} ➔ {region_b}"
             direction_type = "Спрямоване випередження (A ➔ B)"
-            lead_time = best_lag_min if best_lag_min > 0 else 10
-        elif best_lag_min < 0 or shoulder_diff < -0.01:
+            if best_lag_min > 0:
+                peak_nonzero_lag_min = int(best_lag_min)
+            else:
+                peak_nonzero_lag_min = int(pos_lags_min[int(np.argmax(pos_corrs - neg_corrs))])
+            lead_time = int(peak_nonzero_lag_min)
+        elif shoulder_diff < -0.001:
             dominant_direction = f"{region_b} ➔ {region_a}"
             direction_type = "Спрямоване випередження (B ➔ A)"
-            lead_time = abs(best_lag_min) if best_lag_min < 0 else 10
+            if best_lag_min < 0:
+                peak_nonzero_lag_min = int(best_lag_min)
+            else:
+                peak_nonzero_lag_min = -int(pos_lags_min[int(np.argmax(neg_corrs - pos_corrs))])
+            lead_time = int(abs(peak_nonzero_lag_min))
         else:
             dominant_direction = f"{region_a} ⟷ {region_b}"
-            direction_type = "Синхронне включення (< 10 хв)"
+            direction_type = "Синхронне включення (< 2 хв)"
+            peak_nonzero_lag_min = 0
             lead_time = 0
 
-        # Number of joint co-activations
-        co_activations = int((series_a & series_b).sum())
+        # Number of joint active 2-min steps & joint onset impulse steps
+        co_activations = int((local_active_grid[:, idx_a] & local_active_grid[:, idx_b]).sum())
+        co_onset_steps = int((local_onset_grid[:, idx_a] & local_onset_grid[:, idx_b]).sum())
 
         results.append({
             "region_a": region_a,
@@ -177,9 +209,13 @@ def analyze_spatial_propagation(
             "dominant_pair": dominant_direction,
             "direction_type": direction_type,
             "lead_time_min": lead_time,
+            "best_lag_min": best_lag_min,
+            "peak_nonzero_lag_min": peak_nonzero_lag_min,
+            "shoulder_diff": round(shoulder_diff, 6),
             "max_correlation": round(max_corr, 4),
             "correlation_lag0": round(corr_lag0, 4),
             "joint_active_intervals": co_activations,
+            "joint_onset_steps": co_onset_steps,
         })
 
     results_df = pd.DataFrame(results).sort_values("max_correlation", ascending=False).reset_index(drop=True)
@@ -200,15 +236,15 @@ def analyze_spatial_propagation(
 
     bars1 = ax1.barh(pair_labels_1, top_15_corr["max_correlation"], color=colors_1, alpha=0.85)
     ax1.invert_yaxis()
-    ax1.set_xlabel("Коефіцієнт крос-кореляції (r)", fontsize=12)
-    ax1.set_title("Топ-15 суміжних пар за силою зв'язку (Координація сусідів)", fontsize=13, fontweight="bold")
+    ax1.set_xlabel("Коефіцієнт крос-кореляції імпульсів старту (r)", fontsize=12)
+    ax1.set_title("Топ-15 суміжних пар за силою зв'язку стартів тривог (сітка 2 хв)", fontsize=13, fontweight="bold")
     ax1.grid(axis="x", linestyle="--", alpha=0.5)
 
     for bar, (_, row) in zip(bars1, top_15_corr.iterrows()):
         ax1.text(
             bar.get_width() + 0.01,
             bar.get_y() + bar.get_height() / 2,
-            f"r = {row['max_correlation']:.3f} | {row['direction_type'][:12]}...",
+            f"r = {row['max_correlation']:.3f} | Δτ = {row['lead_time_min']} хв | {row['direction_type'][:12]}...",
             va="center",
             fontsize=9.5,
         )
@@ -216,19 +252,20 @@ def analyze_spatial_propagation(
 
     # Panel 2: Distribution of Lead Times & Directional Flow
     type_counts = results_df["direction_type"].value_counts()
+    palette_pie = ["#2b83ba", "#fdae61", "#d7191c"][:len(type_counts)]
     wedges, texts, autotexts = ax2.pie(
         type_counts.values,
         labels=type_counts.index,
         autopct="%1.1f%%",
         startangle=140,
-        colors=["#2b83ba", "#fdae61", "#d7191c"],
+        colors=palette_pie,
         explode=[0.05] * len(type_counts),
         textprops={"fontsize": 11},
     )
     for at in autotexts:
         at.set_fontsize(11)
         at.set_fontweight("bold")
-    ax2.set_title("Структура часових зв'язків між сусідами (49 пар)", fontsize=13, fontweight="bold")
+    ax2.set_title("Структура хвильових зв'язків між сусідами (49 пар, сітка 2 хв)", fontsize=13, fontweight="bold")
 
     plt.tight_layout()
     fig_path = figures_dir / "06_spatial_cross_correlation_routes.png"
@@ -246,4 +283,4 @@ if __name__ == "__main__":
 
     df_res = analyze_spatial_propagation(parquet_file, reports_dir)
     print("\nТоп-5 пар за силою кореляції:")
-    print(df_res[["dominant_pair", "max_correlation", "lead_time_min", "direction_type"]].head(5).to_string())
+    print(df_res[["dominant_pair", "max_correlation", "best_lag_min", "peak_nonzero_lag_min", "lead_time_min", "direction_type"]].head(5).to_string())

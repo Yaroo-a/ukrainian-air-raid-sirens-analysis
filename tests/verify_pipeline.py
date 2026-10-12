@@ -37,7 +37,7 @@ def verify_pipeline():
     print("\n📦 1. Перевірка цілісності Parquet-файлів та Feature Store (Official & Volunteer)...")
     assert data_file.exists(), "FAIL: Parquet dataset is missing!"
     df = pd.read_parquet(data_file)
-    assert len(df) == 84908, f"FAIL: Unexpected row count: {len(df)}"
+    assert len(df) == 84909, f"FAIL: Unexpected row count: {len(df)}"
     assert df["oblast"].nunique() == 25, "FAIL: Oblast count mismatch!"
     assert (df[df["is_finished"]]["duration_seconds"] < 0).sum() == 0, "FAIL: Negative duration found!"
     assert set(df["split_set"].unique()) == {"train", "val", "test"}, "FAIL: Split set mismatch!"
@@ -45,17 +45,17 @@ def verify_pipeline():
 
     assert ml_file.exists(), "FAIL: ML Feature Store Parquet is missing!"
     ml_df = pd.read_parquet(ml_file)
-    assert len(ml_df) == 797428, f"FAIL: Unexpected ML Feature Store row count: {len(ml_df)}"
+    assert len(ml_df) == 797427, f"FAIL: Unexpected ML Feature Store row count: {len(ml_df)}"
     print(f"   ✔ Feature Store ml_features_hourly.parquet валідний: {len(ml_df):,} спокійних годин.")
 
     assert vol_data_file.exists(), "FAIL: Volunteer Parquet dataset is missing!"
     vdf = pd.read_parquet(vol_data_file)
-    assert len(vdf) == 113525, f"FAIL: Unexpected volunteer row count: {len(vdf)}"
+    assert len(vdf) == 113532, f"FAIL: Unexpected volunteer row count: {len(vdf)}"
     print(f"   ✔ Датасет volunteer_alerts_clean_as_is.parquet валідний: {len(vdf):,} рядків.")
 
     assert vol_ml_file.exists(), "FAIL: Volunteer ML Feature Store Parquet is missing!"
     vml_df = pd.read_parquet(vol_ml_file)
-    assert len(vml_df) > 700000, f"FAIL: Unexpected Volunteer ML Feature Store row count: {len(vml_df)}"
+    assert len(vml_df) == 871498, f"FAIL: Unexpected Volunteer ML Feature Store row count: {len(vml_df)}"
     print(f"   ✔ Feature Store volunteer_ml_features_hourly_as_is.parquet валідний: {len(vml_df):,} спокійних годин.")
 
     # 2. Figures Verification (Official, Volunteer, Comparison)

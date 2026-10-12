@@ -387,10 +387,10 @@ def run_test_evaluation():
 
     def _status_label(m: str) -> str:
         if m == val_winner_model:
-            return "pre-specified winner (selected on Val by PR-AUC)"
+            return "selected on Val by PR-AUC (rule formulated after initial Test inspection)"
         if "Set C'" in m:
             return "post-hoc sensitivity experiment (Set C')"
-        return "pre-specified candidate"
+        return "candidate model (Val PR-AUC selection rule formulated after initial Test inspection)"
 
     df_val_results["selection_status"] = df_val_results["model"].map(_status_label)
     df_val_results.to_csv("reports/official/ml_validation_benchmark.csv", index=False)
@@ -400,7 +400,8 @@ def run_test_evaluation():
         "val_total_days": int(n_val_days),
         "val_positives": int(y_val.sum()),
         "val_base_rate": float(y_val.mean()),
-        "selection_rule": "arg max PR-AUC on Validation among pre-specified models (Sets A, B, C)",
+        "selection_rule": "arg max PR-AUC on Validation among candidate models (rule formulated after initial Test inspection) (Sets A, B, C)",
+        "early_stopping_subsplit": "Internal chronological split at tail of Train (last 60 days of Train with 2h embargo after Train_Fit; Val 100% untouched by early stopping)",
         "selected_model_on_val": val_winner_model,
         "selected_model_val_pr_auc": float(df_val_results.loc[val_winner_idx, "pr_auc"]),
         "selected_model_val_f2": float(df_val_results.loc[val_winner_idx, "f2_score"]),
@@ -418,7 +419,7 @@ def run_test_evaluation():
     # 1. ПОВНИЙ TEST
     print("\n🔄 1. Запуск парного Day-Block Bootstrap (500 ітерацій за добами) на повному Test...")
     df_results, paired_diffs, best_base_name = evaluate_slice(
-        dates_test, y_test, probas, configs, n_bootstraps=500, fixed_ref_recall=0.7822716049382716
+        dates_test, y_test, probas, configs, n_bootstraps=500, fixed_ref_recall=None
     )
     df_results["selection_status"] = df_results["model"].map(_status_label)
     df_results.to_csv("reports/official/ml_models_benchmark.csv", index=False)
@@ -444,7 +445,7 @@ def run_test_evaluation():
         f"рядків: {pre_mask.sum():,}, діб: {len(np.unique(dates_pre))}, стартів: {y_pre.sum():,}, базова частка: {y_pre.mean():.4%}):"
     )
     df_pre, pre_diffs, _ = evaluate_slice(
-        dates_pre, y_pre, probas_pre, configs, n_bootstraps=500, fixed_ref_recall=0.7822716049382716
+        dates_pre, y_pre, probas_pre, configs, n_bootstraps=500, fixed_ref_recall=None
     )
     df_pre.to_csv("reports/official/ml_test_pre_aug2025_benchmark.csv", index=False)
     print(df_pre[cols_show].to_string(index=False))
@@ -460,7 +461,7 @@ def run_test_evaluation():
         f"рядків: {post_mask.sum():,}, діб: {len(np.unique(dates_post))}, стартів: {y_post.sum():,}, базова частка: {y_post.mean():.4%}):"
     )
     df_post, post_diffs, _ = evaluate_slice(
-        dates_post, y_post, probas_post, configs, n_bootstraps=500, fixed_ref_recall=0.7822716049382716
+        dates_post, y_post, probas_post, configs, n_bootstraps=500, fixed_ref_recall=None
     )
     df_post.to_csv("reports/official/ml_test_post_aug2025_benchmark.csv", index=False)
     print(df_post[cols_show].to_string(index=False))
@@ -478,7 +479,7 @@ def run_test_evaluation():
         f"рядків: {recent_mask.sum():,}, стартів: {y_recent.sum():,}, базова частка: {y_recent.mean():.4%}):"
     )
     df_recent, recent_diffs, _ = evaluate_slice(
-        dates_recent, y_recent, probas_recent, configs, n_bootstraps=500, fixed_ref_recall=0.7822716049382716
+        dates_recent, y_recent, probas_recent, configs, n_bootstraps=500, fixed_ref_recall=None
     )
     df_recent.to_csv("reports/official/ml_recent_60d_benchmark.csv", index=False)
     print(df_recent[cols_show].to_string(index=False))

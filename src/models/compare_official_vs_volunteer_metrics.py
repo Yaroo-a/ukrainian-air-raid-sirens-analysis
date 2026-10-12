@@ -114,7 +114,7 @@ def plot_pr_auc_and_f2_comparisons(metrics_df: pd.DataFrame, fig_dir: Path) -> N
         "LogReg (Set C': Adaptive + Lags)": "LogReg Set C'",
         "LightGBM (Set A: No Spatial)": "LGBM Set A",
         "LightGBM (Set B: With Spatial)": "LGBM Set B",
-        "LightGBM (Set C: Spatial + Adaptive)": "LGBM Set C (Val Win)",
+        "LightGBM (Set C: Spatial + Adaptive)": "LGBM Set C (Val Selected)",
         "LightGBM (Set C': Adaptive + Lags)": "LGBM Set C'",
     }
 
@@ -263,7 +263,7 @@ def plot_feature_shift_comparison(shift_df: pd.DataFrame, metrics_df: pd.DataFra
     models_focus = [
         ("Baseline 3: Adaptive 14-day Rolling", "Adaptive 14d"),
         ("LightGBM (Set B: With Spatial)", "LGBM Set B\n(No Adaptive/Nat)"),
-        ("LightGBM (Set C: Spatial + Adaptive)", "LGBM Set C\n(Val Winner)"),
+        ("LightGBM (Set C: Spatial + Adaptive)", "LGBM Set C\n(Selected on Val)"),
         ("LightGBM (Set C': Adaptive + Lags)", "LGBM Set C'\n(Post-hoc)"),
         ("LogReg (Set C: Spatial + Adaptive)", "LogReg Set C"),
     ]
@@ -281,7 +281,7 @@ def plot_feature_shift_comparison(shift_df: pd.DataFrame, metrics_df: pd.DataFra
         h = r.get_height()
         ax4.annotate(f"{h:.4f}", (r.get_x() + r.get_width() / 2, h + 0.006), ha="center", fontsize=8.5, fontweight="bold", color="#8c3800")
 
-    ax4.set_title("Г. Наслідок зсуву: інверсія Set B vs Set C зникає на Volunteer", fontsize=12.5, fontweight="bold", pad=10)
+    ax4.set_title("Г. Зіставлення Set B vs Set C на Official та Volunteer (узгоджується зі зсувом ознак)", fontsize=12.5, fontweight="bold", pad=10)
     ax4.set_ylabel("Full Test PR-AUC", fontsize=10.5)
     ax4.set_xticks(xf)
     ax4.set_xticklabels([lbl for _, lbl in models_focus], fontsize=9.5)
@@ -398,7 +398,7 @@ def plot_volunteer_naive_sensitivity(vol_dir: Path, fig_dir: Path) -> None:
     lg_err = np.array([_parse_ci(ci, v) for ci, v in zip(lgb_c["test_pr_auc_ci_95"], lg_pr)]).T
 
     b1 = ax1.bar(x - w / 2, ad_pr, w, yerr=ad_err, capsize=4, label="Baseline 3: Adaptive 14-day", color="#2ca02c", edgecolor="black", alpha=0.85)
-    b2 = ax1.bar(x + w / 2, lg_pr, w, yerr=lg_err, capsize=4, label="LightGBM (Set C: Val Winner)", color="#d62728", edgecolor="black", alpha=0.88)
+    b2 = ax1.bar(x + w / 2, lg_pr, w, yerr=lg_err, capsize=4, label="LightGBM (Set C: Selected on Val)", color="#d62728", edgecolor="black", alpha=0.88)
     for r in b1:
         ax1.annotate(f"{r.get_height():.4f}", (r.get_x() + r.get_width() / 2, r.get_height() - 0.025), ha="center", color="white", fontweight="bold", fontsize=9.5)
     for r in b2:
@@ -417,7 +417,7 @@ def plot_volunteer_naive_sensitivity(vol_dir: Path, fig_dir: Path) -> None:
     lg_f2_err = np.array([_parse_ci(ci, v) for ci, v in zip(lgb_c["test_f2_ci_95"], lg_f2)]).T
 
     f1 = ax2.bar(x - w / 2, ad_f2, w, yerr=ad_f2_err, capsize=4, label="Baseline 3: Adaptive 14-day", color="#2ca02c", edgecolor="black", alpha=0.85)
-    f2 = ax2.bar(x + w / 2, lg_f2, w, yerr=lg_f2_err, capsize=4, label="LightGBM (Set C: Val Winner)", color="#d62728", edgecolor="black", alpha=0.88)
+    f2 = ax2.bar(x + w / 2, lg_f2, w, yerr=lg_f2_err, capsize=4, label="LightGBM (Set C: Selected on Val)", color="#d62728", edgecolor="black", alpha=0.88)
     for r in f1:
         ax2.annotate(f"{r.get_height():.4f}", (r.get_x() + r.get_width() / 2, r.get_height() - 0.03), ha="center", color="white", fontweight="bold", fontsize=9.5)
     for r in f2:

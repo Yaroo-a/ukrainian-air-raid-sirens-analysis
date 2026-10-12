@@ -4,7 +4,7 @@
   "static_lgb_model_artifact": "models/lightgbm_adaptive.joblib",
   "static_thresholds_artifact": "models/optimal_thresholds.json",
   "oof_predictions_parquet_path": "data/processed/walk_forward_oof_predictions_official.parquet",
-  "oof_predictions_sha256": "5060d394743e4b7c4ee4491f1985d192dec9d309558290f68c7db410ba576c84",
+  "oof_predictions_sha256": "adee0252b959a42a6b4bb3bab24fe3d3c40ec8ddaa05edfbca7b165d06bc5dc5",
   "target_interval_definition": "[T, T+1h)",
   "embargo_hours": 2,
   "primary_hypothesis": {
@@ -14,10 +14,10 @@
     "metric": "Paired Delta PR-AUC (Day-Block Bootstrap N=500, seed=42)"
   },
   "methodological_notes": {
-    "hyperparameter_alignment_history": "У першому (докомітному) прогоні Walk-Forward функція fit_fold_lightgbm мала відмінні від train_models.py гіперпараметри (n_estimators=600, learning_rate=0.04, num_leaves=31, max_depth=6, min_child_samples=120, class_weight='balanced', eval_metric='average_precision'), а Static LightGBM перенавчався ними ж замість завантаження замороженого .joblib. Тоді на Volunteer LightGBM (Set C) [WF Rolling 12m] мав на повному Test pooled_pr_auc = 0.3935 [0.385, 0.401] та delta_prauc_vs_adapt_wf = +0.0012 [-0.0040, +0.0067] (статистичний паритет із Adaptive 14-day = 0.3924 [0.384, 0.400], тобто відсутність значущого приросту на повному Test), на останніх 60 днях — pooled_pr_auc = 0.4933 [0.480, 0.509] та delta_prauc_vs_adapt_wf = +0.0125 [+0.0042, +0.0215], а Static LightGBM мав pooled_pr_auc = 0.3684 [0.360, 0.377] (delta_prauc_vs_adapt_wf = -0.0239 [-0.0285, -0.0194]) на повному Test та 0.4261 [0.415, 0.440] (delta_prauc_vs_adapt_wf = -0.0548 [-0.0641, -0.0449]) на останніх 60 днях. Після суворого вирівнювання fit_fold_lightgbm до параметрів train_models.py (n_estimators=300, learning_rate=0.05, num_leaves=31, max_depth=-1, min_child_samples=50, без class_weight='balanced', зі стандартним binary_logloss early stopping) та переходу Static на заморожений volunteer_lightgbm_adaptive_fixed_d.joblib висновок на Volunteer змінився: на повному Test (volunteer_walk_forward_overall_benchmark.csv) для LightGBM (Set C) [WF Rolling 12m] pooled_pr_auc зріс до 0.4050468889682864 (0.4050 [0.397, 0.413]), а delta_prauc_vs_adapt_wf став статистично значущим: +0.01277323959789397 (+0.0128 [+0.0082, +0.0168]); для LightGBM (Set C) [Static Initial Train] (fixed_d) pooled_pr_auc становить 0.390230721659669 (0.3902 [0.383, 0.397]), delta_prauc_vs_adapt_wf = -0.0019152044766016757 (-0.0019 [-0.0065, +0.0024]). На останніх 60 днях (volunteer_walk_forward_recent_60d_benchmark.csv) для LightGBM (Set C) [WF Rolling 12m] pooled_pr_auc зріс до 0.49750844169332 (0.4975 [0.486, 0.512]), delta_prauc_vs_adapt_wf = +0.016718345170182388 (+0.0167 [+0.0089, +0.0252]), а для Static Initial Train (fixed_d) pooled_pr_auc становить 0.4546067304670379 (0.4546 [0.440, 0.472]), delta_prauc_vs_adapt_wf = -0.02624850710058918 (-0.0262 [-0.0360, -0.0156]). Водночас за PR-AUC на Volunteer LightGBM WF Rolling 12m (0.4050) поступається LogReg (Set C) [Static Initial Train] (0.40973998394841066, [0.401, 0.418], парна різниця LGBM_WF − LogReg_Static = -0.004641689962824445 [-0.0081, -0.0013]) і перебуває на рівні LogReg (Set C) [WF Rolling 12m] (0.4057240668278464, [0.397, 0.414]). Примітка: згадані в попередніх чернетках числа 0.4094 та 0.4793 (Δ = −0.0017) були взяті з пам'яті і не підтверджені жодним CSV чи логом прогонів.",
+    "hyperparameter_alignment_history": "У першому (докомітному) прогоні Walk-Forward функція fit_fold_lightgbm мала відмінні від train_models.py гіперпараметри (n_estimators=600, learning_rate=0.04, num_leaves=31, max_depth=6, min_child_samples=120, class_weight='balanced', eval_metric='average_precision'), а Static LightGBM перенавчався ними ж замість завантаження замороженого .joblib. Тоді на Volunteer LightGBM (Set C) [WF Rolling 12m] мав на повному Test pooled_pr_auc = 0.3935 [0.385, 0.401] та delta_prauc_vs_adapt_wf = +0.0012 [-0.0040, +0.0067] (статистичний паритет із Adaptive 14-day = 0.3924 [0.384, 0.400], тобто відсутність значущого приросту на повному Test), на останніх 60 днях — pooled_pr_auc = 0.4933 [0.480, 0.509] та delta_prauc_vs_adapt_wf = +0.0125 [+0.0042, +0.0215], а Static LightGBM мав pooled_pr_auc = 0.3684 [0.360, 0.377] (delta_prauc_vs_adapt_wf = -0.0239 [-0.0285, -0.0194]) на повному Test та 0.4261 [0.415, 0.440] (delta_prauc_vs_adapt_wf = -0.0548 [-0.0641, -0.0449]) на останніх 60 днях. Після суворого вирівнювання fit_fold_lightgbm до параметрів train_models.py (n_estimators=300, learning_rate=0.05, num_leaves=31, max_depth=-1, min_child_samples=50, без class_weight='balanced', зі стандартним binary_logloss early stopping на внутрішньому підвиділі Train_ES з 2-годинним embargo) та переходу Static на заморожений volunteer_lightgbm_adaptive_fixed_d.joblib висновок на Volunteer змінився: на повному Test (volunteer_walk_forward_overall_benchmark.csv) для LightGBM (Set C) [WF Rolling 12m] pooled_pr_auc становить 0.3997006181076793 (0.3997 [0.391, 0.407]), а delta_prauc_vs_adapt_wf є статистично значущим: +0.007361836781352378 (+0.0074 [+0.0027, +0.0121]); для LightGBM (Set C) [Static Initial Train] (fixed_d) pooled_pr_auc становить 0.386489711517043 (0.3865 [0.379, 0.394]), delta_prauc_vs_adapt_wf = -0.0056881821893382985 (-0.0057 [-0.0095, -0.0016]). На останніх 60 днях (volunteer_walk_forward_recent_60d_benchmark.csv) для LightGBM (Set C) [WF Rolling 12m] pooled_pr_auc становить 0.4913018432350895 (0.4913 [0.478, 0.507]), delta_prauc_vs_adapt_wf = +0.010493026273977276 (+0.0105 [+0.0016, +0.0199]), а для Static Initial Train (fixed_d) pooled_pr_auc становить 0.45790510421599974 (0.4579 [0.443, 0.476]), delta_prauc_vs_adapt_wf = -0.022935453339100994 (-0.0229 [-0.0321, -0.0134]). Водночас за PR-AUC на Volunteer LightGBM WF Rolling 12m (0.3997) поступається LogReg (Set C) [Static Initial Train] (0.4098184224975681, [0.401, 0.418], парна різниця LGBM_WF − LogReg_Static = -0.010052281736511752 [-0.0137, -0.0064]) та LogReg (Set C) [WF Rolling 12m] (0.40580856593089326, [0.398, 0.414]). Примітка: згадані в попередніх чернетках числа 0.4094 та 0.4793 (Δ = −0.0017) були взяті з пам'яті і не підтверджені жодним CSV чи логом прогонів.",
     "causal_interpretation_caveat": "Спостережуваний приріст Walk-Forward над статичним LightGBM узгоджується з гіпотезою про адаптацію до зміни режиму з червня 2025 року та зняттям насичення діапазону розбиттів дерев наприкінці 2026 року (окремий каузальний інтервенційний тест причини не проводився)."
   },
-  "measured_runtime_seconds": 503.98,
+  "measured_runtime_seconds": 503.78,
   "n_test_months": 16,
   "test_months": [
     "2025-06",
@@ -47,103 +47,103 @@
     "LightGBM Set C (Rolling 12m vs Static)": {
       "wf_model": "LightGBM (Set C) [WF Rolling 12m]",
       "reference_model": "LightGBM (Set C) [Static Initial Train]",
-      "wf_minus_adapt_prauc_mean": 0.11706220833504918,
+      "wf_minus_adapt_prauc_mean": 0.11272542959657413,
       "wf_minus_adapt_prauc_ci_95": [
-        0.1081147017178055,
-        0.12613845650335587
+        0.10350273205418455,
+        0.12163111464141137
       ],
-      "ref_minus_adapt_prauc_mean": 0.029742445980037065,
+      "ref_minus_adapt_prauc_mean": 0.025964048606243607,
       "ref_minus_adapt_prauc_ci_95": [
-        0.02199919764617967,
-        0.0373233366362519
+        0.01817024755004651,
+        0.03332813109176987
       ],
-      "wf_minus_ref_prauc_mean": 0.08731976235501213,
+      "wf_minus_ref_prauc_mean": 0.08676138099033052,
       "wf_minus_ref_prauc_ci_95": [
-        0.0788791407607976,
-        0.09504365131392536
+        0.07764680294499768,
+        0.09508982788932646
       ],
-      "wf_minus_adapt_f2_mean": 0.04813383191746637,
+      "wf_minus_adapt_f2_mean": 0.04629470149413512,
       "wf_minus_adapt_f2_ci_95": [
-        0.0419304169568981,
-        0.0539795740706106
+        0.04053468456371986,
+        0.05201083403729641
       ],
-      "ref_minus_adapt_f2_mean": 0.027441100429945492,
+      "ref_minus_adapt_f2_mean": 0.027593989485708653,
       "ref_minus_adapt_f2_ci_95": [
-        0.02140340550332282,
-        0.033311525185500505
+        0.021676596183331922,
+        0.033407932956777346
       ],
-      "wf_minus_ref_f2_mean": 0.020692731487520873,
+      "wf_minus_ref_f2_mean": 0.018700712008426473,
       "wf_minus_ref_f2_ci_95": [
-        0.016854165152990652,
-        0.024477785621200038
+        0.014896564298382913,
+        0.022673016372846688
       ]
     },
     "LogReg Static проти LGBM WF (Set C: LGBM_WF − LogReg_Static)": {
       "wf_model": "LightGBM (Set C) [WF Rolling 12m]",
       "reference_model": "LogReg (Set C) [Static Initial Train]",
-      "wf_minus_adapt_prauc_mean": 0.11706220833504918,
+      "wf_minus_adapt_prauc_mean": 0.11272542959657413,
       "wf_minus_adapt_prauc_ci_95": [
-        0.1081147017178055,
-        0.12613845650335587
+        0.10350273205418455,
+        0.12163111464141137
       ],
-      "ref_minus_adapt_prauc_mean": 0.013995957853478397,
+      "ref_minus_adapt_prauc_mean": 0.014108338576479088,
       "ref_minus_adapt_prauc_ci_95": [
-        0.00891317335994966,
-        0.019897231432613682
+        0.009030013694839223,
+        0.020011014882587243
       ],
-      "wf_minus_ref_prauc_mean": 0.1030662504815708,
+      "wf_minus_ref_prauc_mean": 0.09861709102009504,
       "wf_minus_ref_prauc_ci_95": [
-        0.09441560054408044,
-        0.11201949083704728
+        0.08967508070657915,
+        0.1075553485795965
       ],
-      "wf_minus_adapt_f2_mean": 0.04813383191746637,
+      "wf_minus_adapt_f2_mean": 0.04629470149413512,
       "wf_minus_adapt_f2_ci_95": [
-        0.0419304169568981,
-        0.0539795740706106
+        0.04053468456371986,
+        0.05201083403729641
       ],
-      "ref_minus_adapt_f2_mean": 0.015610812367777442,
+      "ref_minus_adapt_f2_mean": 0.015606295410818588,
       "ref_minus_adapt_f2_ci_95": [
-        0.010286592637257511,
-        0.020746169133477533
+        0.010265559513306538,
+        0.020750997607086652
       ],
-      "wf_minus_ref_f2_mean": 0.03252301954968893,
+      "wf_minus_ref_f2_mean": 0.030688406083316536,
       "wf_minus_ref_f2_ci_95": [
-        0.027596479945238468,
-        0.03707691899848844
+        0.026342361726434553,
+        0.034796348610602774
       ]
     },
     "LightGBM Set C (Expanding vs Static)": {
       "wf_model": "LightGBM (Set C) [WF Expanding]",
       "reference_model": "LightGBM (Set C) [Static Initial Train]",
-      "wf_minus_adapt_prauc_mean": 0.11951401722181783,
+      "wf_minus_adapt_prauc_mean": 0.11585389578908786,
       "wf_minus_adapt_prauc_ci_95": [
-        0.11076762443290541,
-        0.12816980826868787
+        0.10706989636541055,
+        0.12462258371555393
       ],
-      "ref_minus_adapt_prauc_mean": 0.029742445980037065,
+      "ref_minus_adapt_prauc_mean": 0.025964048606243607,
       "ref_minus_adapt_prauc_ci_95": [
-        0.02199919764617967,
-        0.0373233366362519
+        0.01817024755004651,
+        0.03332813109176987
       ],
-      "wf_minus_ref_prauc_mean": 0.08977157124178077,
+      "wf_minus_ref_prauc_mean": 0.08988984718284425,
       "wf_minus_ref_prauc_ci_95": [
-        0.08264254799815064,
-        0.0970613619262927
+        0.08274738529450824,
+        0.0973272838812258
       ],
-      "wf_minus_adapt_f2_mean": 0.04612585854997286,
+      "wf_minus_adapt_f2_mean": 0.04243349928625325,
       "wf_minus_adapt_f2_ci_95": [
-        0.040018431527234534,
-        0.05213496428911841
+        0.03626527722031555,
+        0.0485758328375001
       ],
-      "ref_minus_adapt_f2_mean": 0.027441100429945492,
+      "ref_minus_adapt_f2_mean": 0.027593989485708653,
       "ref_minus_adapt_f2_ci_95": [
-        0.02140340550332282,
-        0.033311525185500505
+        0.021676596183331922,
+        0.033407932956777346
       ],
-      "wf_minus_ref_f2_mean": 0.018684758120027366,
+      "wf_minus_ref_f2_mean": 0.01483950980054459,
       "wf_minus_ref_f2_ci_95": [
-        0.015412146967528096,
-        0.02218474559758946
+        0.011017987464071361,
+        0.018862819846253518
       ]
     },
     "LogReg Set C (Rolling 12m vs Static)": {
@@ -154,98 +154,98 @@
         0.084853190529691,
         0.1017241033603956
       ],
-      "ref_minus_adapt_prauc_mean": 0.013995957853478397,
+      "ref_minus_adapt_prauc_mean": 0.014108338576479088,
       "ref_minus_adapt_prauc_ci_95": [
-        0.00891317335994966,
-        0.019897231432613682
+        0.009030013694839223,
+        0.020011014882587243
       ],
-      "wf_minus_ref_prauc_mean": 0.07917855934229777,
+      "wf_minus_ref_prauc_mean": 0.07906617861929706,
       "wf_minus_ref_prauc_ci_95": [
-        0.07159478228100558,
-        0.08654700385894964
+        0.07148595459631531,
+        0.08643389303107091
       ],
       "wf_minus_adapt_f2_mean": 0.03608417812723111,
       "wf_minus_adapt_f2_ci_95": [
         0.031362942805289784,
         0.04083798651868394
       ],
-      "ref_minus_adapt_f2_mean": 0.015610812367777442,
+      "ref_minus_adapt_f2_mean": 0.015606295410818588,
       "ref_minus_adapt_f2_ci_95": [
-        0.010286592637257511,
-        0.020746169133477533
+        0.010265559513306538,
+        0.020750997607086652
       ],
-      "wf_minus_ref_f2_mean": 0.020473365759453667,
+      "wf_minus_ref_f2_mean": 0.020477882716412522,
       "wf_minus_ref_f2_ci_95": [
-        0.01619812167550424,
-        0.02494848583285306
+        0.016175496424879487,
+        0.02497155131291534
       ]
     },
     "LogReg Set C (Expanding vs Static)": {
       "wf_model": "LogReg (Set C) [WF Expanding]",
       "reference_model": "LogReg (Set C) [Static Initial Train]",
-      "wf_minus_adapt_prauc_mean": 0.06408471060303027,
+      "wf_minus_adapt_prauc_mean": 0.06409299409722521,
       "wf_minus_adapt_prauc_ci_95": [
-        0.05745024844447204,
-        0.07085292535198447
+        0.057456426088109386,
+        0.07086236363523975
       ],
-      "ref_minus_adapt_prauc_mean": 0.013995957853478397,
+      "ref_minus_adapt_prauc_mean": 0.014108338576479088,
       "ref_minus_adapt_prauc_ci_95": [
-        0.00891317335994966,
-        0.019897231432613682
+        0.009030013694839223,
+        0.020011014882587243
       ],
-      "wf_minus_ref_prauc_mean": 0.05008875274955188,
+      "wf_minus_ref_prauc_mean": 0.049984655520746116,
       "wf_minus_ref_prauc_ci_95": [
-        0.045948419374548,
-        0.05477402169323576
+        0.04583859140303867,
+        0.054656781740545696
       ],
-      "wf_minus_adapt_f2_mean": 0.03277215584354503,
+      "wf_minus_adapt_f2_mean": 0.03284481226306349,
       "wf_minus_adapt_f2_ci_95": [
-        0.028732999733590343,
-        0.036793973049659194
+        0.028807561098778377,
+        0.03684952387728917
       ],
-      "ref_minus_adapt_f2_mean": 0.015610812367777442,
+      "ref_minus_adapt_f2_mean": 0.015606295410818588,
       "ref_minus_adapt_f2_ci_95": [
-        0.010286592637257511,
-        0.020746169133477533
+        0.010265559513306538,
+        0.020750997607086652
       ],
-      "wf_minus_ref_f2_mean": 0.017161343475767588,
+      "wf_minus_ref_f2_mean": 0.01723851685224489,
       "wf_minus_ref_f2_ci_95": [
-        0.013420848938941474,
-        0.020987351132123234
+        0.013560851410603075,
+        0.020993206359944706
       ]
     },
     "LightGBMRolling12m Set D (post-hoc) vs Set C": {
       "wf_model": "LightGBM (Set D: +Rel Ratios) [WF Rolling 12m, post-hoc]",
       "reference_model": "LightGBM (Set C) [WF Rolling 12m]",
-      "wf_minus_adapt_prauc_mean": 0.11581458983571125,
+      "wf_minus_adapt_prauc_mean": 0.11185950176421243,
       "wf_minus_adapt_prauc_ci_95": [
-        0.10660432474876819,
-        0.12483002994182094
+        0.10246629118552511,
+        0.12121819674134163
       ],
-      "ref_minus_adapt_prauc_mean": 0.11706220833504918,
+      "ref_minus_adapt_prauc_mean": 0.11272542959657413,
       "ref_minus_adapt_prauc_ci_95": [
-        0.1081147017178055,
-        0.12613845650335587
+        0.10350273205418455,
+        0.12163111464141137
       ],
-      "wf_minus_ref_prauc_mean": -0.0012476184993379371,
+      "wf_minus_ref_prauc_mean": -0.0008659278323617062,
       "wf_minus_ref_prauc_ci_95": [
-        -0.003239938097333386,
-        0.0006986907796463299
+        -0.0031122043325977054,
+        0.0015002461135848176
       ],
-      "wf_minus_adapt_f2_mean": 0.04771111829600792,
+      "wf_minus_adapt_f2_mean": 0.04392450401677076,
       "wf_minus_adapt_f2_ci_95": [
-        0.04170598152474751,
-        0.053821888697585016
+        0.038184479306232755,
+        0.04985502255569009
       ],
-      "ref_minus_adapt_f2_mean": 0.04813383191746637,
+      "ref_minus_adapt_f2_mean": 0.04629470149413512,
       "ref_minus_adapt_f2_ci_95": [
-        0.0419304169568981,
-        0.0539795740706106
+        0.04053468456371986,
+        0.05201083403729641
       ],
-      "wf_minus_ref_f2_mean": -0.00042271362145843947,
+      "wf_minus_ref_f2_mean": -0.0023701974773643678,
       "wf_minus_ref_f2_ci_95": [
-        -0.0023931148435068494,
-        0.0015164084468764047
+        -0.004387205509789082,
+        -0.0004690348114748136
       ]
     }
   },
@@ -253,103 +253,103 @@
     "LightGBM Set C (Rolling 12m vs Static)": {
       "wf_model": "LightGBM (Set C) [WF Rolling 12m]",
       "reference_model": "LightGBM (Set C) [Static Initial Train]",
-      "wf_minus_adapt_prauc_mean": 0.14497846394607466,
+      "wf_minus_adapt_prauc_mean": 0.13385834103350475,
       "wf_minus_adapt_prauc_ci_95": [
-        0.11769474093252376,
-        0.17264345050877608
+        0.10055764662001318,
+        0.16549040965564635
       ],
-      "ref_minus_adapt_prauc_mean": 0.012584375373818563,
+      "ref_minus_adapt_prauc_mean": 0.01482780181890746,
       "ref_minus_adapt_prauc_ci_95": [
-        -0.005512664347152528,
-        0.031380592329768225
+        -0.0031508455841866134,
+        0.0316778752268801
       ],
-      "wf_minus_ref_prauc_mean": 0.1323940885722561,
+      "wf_minus_ref_prauc_mean": 0.1190305392145973,
       "wf_minus_ref_prauc_ci_95": [
-        0.10916680952136315,
-        0.1564606579899447
+        0.08977241109079534,
+        0.14656956301396962
       ],
-      "wf_minus_adapt_f2_mean": 0.019462375726149724,
+      "wf_minus_adapt_f2_mean": 0.017551517245145625,
       "wf_minus_adapt_f2_ci_95": [
-        0.007067718624368624,
-        0.033915491599107714
+        0.005875468943384047,
+        0.02991251379175948
       ],
-      "ref_minus_adapt_f2_mean": -0.010572225828819901,
+      "ref_minus_adapt_f2_mean": -0.010747932482007772,
       "ref_minus_adapt_f2_ci_95": [
-        -0.025512260421615293,
-        0.004089055790135012
+        -0.02588968070871274,
+        0.004742142421302937
       ],
-      "wf_minus_ref_f2_mean": 0.030034601554969623,
+      "wf_minus_ref_f2_mean": 0.028299449727153394,
       "wf_minus_ref_f2_ci_95": [
-        0.021246017365921556,
-        0.0391000327593331
+        0.018557797953798152,
+        0.03799476974776423
       ]
     },
     "LogReg Static проти LGBM WF (Set C: LGBM_WF − LogReg_Static)": {
       "wf_model": "LightGBM (Set C) [WF Rolling 12m]",
       "reference_model": "LogReg (Set C) [Static Initial Train]",
-      "wf_minus_adapt_prauc_mean": 0.14497846394607466,
+      "wf_minus_adapt_prauc_mean": 0.13385834103350475,
       "wf_minus_adapt_prauc_ci_95": [
-        0.11769474093252376,
-        0.17264345050877608
+        0.10055764662001318,
+        0.16549040965564635
       ],
-      "ref_minus_adapt_prauc_mean": 0.020494453816859687,
+      "ref_minus_adapt_prauc_mean": 0.02053121295059256,
       "ref_minus_adapt_prauc_ci_95": [
-        0.005156056096178175,
-        0.034901651934192486
+        0.005182750807966444,
+        0.03493607925783194
       ],
-      "wf_minus_ref_prauc_mean": 0.12448401012921498,
+      "wf_minus_ref_prauc_mean": 0.11332712808291219,
       "wf_minus_ref_prauc_ci_95": [
-        0.10297913029872774,
-        0.1478728593375401
+        0.08705947259954894,
+        0.14022170183342372
       ],
-      "wf_minus_adapt_f2_mean": 0.019462375726149724,
+      "wf_minus_adapt_f2_mean": 0.017551517245145625,
       "wf_minus_adapt_f2_ci_95": [
-        0.007067718624368624,
-        0.033915491599107714
+        0.005875468943384047,
+        0.02991251379175948
       ],
       "ref_minus_adapt_f2_mean": -0.021252854569023264,
       "ref_minus_adapt_f2_ci_95": [
         -0.03558622380233737,
         -0.006041878212240103
       ],
-      "wf_minus_ref_f2_mean": 0.04071523029517299,
+      "wf_minus_ref_f2_mean": 0.03880437181416889,
       "wf_minus_ref_f2_ci_95": [
-        0.030483426615890378,
-        0.052066955617850484
+        0.027929695592504005,
+        0.05003872140103986
       ]
     },
     "LightGBM Set C (Expanding vs Static)": {
       "wf_model": "LightGBM (Set C) [WF Expanding]",
       "reference_model": "LightGBM (Set C) [Static Initial Train]",
-      "wf_minus_adapt_prauc_mean": 0.14766953690272766,
+      "wf_minus_adapt_prauc_mean": 0.14638924692655153,
       "wf_minus_adapt_prauc_ci_95": [
-        0.12283027929129674,
-        0.17380087306685912
+        0.12127568684884656,
+        0.17235563845287338
       ],
-      "ref_minus_adapt_prauc_mean": 0.012584375373818563,
+      "ref_minus_adapt_prauc_mean": 0.01482780181890746,
       "ref_minus_adapt_prauc_ci_95": [
-        -0.005512664347152528,
-        0.031380592329768225
+        -0.0031508455841866134,
+        0.0316778752268801
       ],
-      "wf_minus_ref_prauc_mean": 0.13508516152890912,
+      "wf_minus_ref_prauc_mean": 0.13156144510764403,
       "wf_minus_ref_prauc_ci_95": [
-        0.11618957017966203,
-        0.15658057574524747
+        0.11484457355561933,
+        0.15284743709439153
       ],
-      "wf_minus_adapt_f2_mean": 0.019504100277170002,
+      "wf_minus_adapt_f2_mean": 0.01714902815293388,
       "wf_minus_adapt_f2_ci_95": [
-        0.007102594105344512,
-        0.03424907298259441
+        0.004767117079035513,
+        0.03137129186952019
       ],
-      "ref_minus_adapt_f2_mean": -0.010572225828819901,
+      "ref_minus_adapt_f2_mean": -0.010747932482007772,
       "ref_minus_adapt_f2_ci_95": [
-        -0.025512260421615293,
-        0.004089055790135012
+        -0.02588968070871274,
+        0.004742142421302937
       ],
-      "wf_minus_ref_f2_mean": 0.030076326105989905,
+      "wf_minus_ref_f2_mean": 0.02789696063494165,
       "wf_minus_ref_f2_ci_95": [
-        0.021220319920522368,
-        0.039331368819732794
+        0.018970657248778985,
+        0.037044228099915776
       ]
     },
     "LogReg Set C (Rolling 12m vs Static)": {
@@ -360,15 +360,15 @@
         0.07975654995537926,
         0.12925319502675556
       ],
-      "ref_minus_adapt_prauc_mean": 0.020494453816859687,
+      "ref_minus_adapt_prauc_mean": 0.02053121295059256,
       "ref_minus_adapt_prauc_ci_95": [
-        0.005156056096178175,
-        0.034901651934192486
+        0.005182750807966444,
+        0.03493607925783194
       ],
-      "wf_minus_ref_prauc_mean": 0.08337017852780364,
+      "wf_minus_ref_prauc_mean": 0.08333341939407075,
       "wf_minus_ref_prauc_ci_95": [
-        0.0660272389264738,
-        0.10165215763936832
+        0.065992320784613,
+        0.10158492477766946
       ],
       "wf_minus_adapt_f2_mean": 0.02455920127484218,
       "wf_minus_adapt_f2_ci_95": [
@@ -389,20 +389,20 @@
     "LogReg Set C (Expanding vs Static)": {
       "wf_model": "LogReg (Set C) [WF Expanding]",
       "reference_model": "LogReg (Set C) [Static Initial Train]",
-      "wf_minus_adapt_prauc_mean": 0.06084733996496806,
+      "wf_minus_adapt_prauc_mean": 0.06084658151575582,
       "wf_minus_adapt_prauc_ci_95": [
-        0.04294319000972992,
-        0.07947223268621859
+        0.04294676193035832,
+        0.07946676986656084
       ],
-      "ref_minus_adapt_prauc_mean": 0.020494453816859687,
+      "ref_minus_adapt_prauc_mean": 0.02053121295059256,
       "ref_minus_adapt_prauc_ci_95": [
-        0.005156056096178175,
-        0.034901651934192486
+        0.005182750807966444,
+        0.03493607925783194
       ],
-      "wf_minus_ref_prauc_mean": 0.04035288614810837,
+      "wf_minus_ref_prauc_mean": 0.040315368565163254,
       "wf_minus_ref_prauc_ci_95": [
-        0.032024893377399354,
-        0.05017411157862594
+        0.0320003572056785,
+        0.05013553048522879
       ],
       "wf_minus_adapt_f2_mean": 0.021069593597881804,
       "wf_minus_adapt_f2_ci_95": [
@@ -423,35 +423,35 @@
     "LightGBMRolling12m Set D (post-hoc) vs Set C": {
       "wf_model": "LightGBM (Set D: +Rel Ratios) [WF Rolling 12m, post-hoc]",
       "reference_model": "LightGBM (Set C) [WF Rolling 12m]",
-      "wf_minus_adapt_prauc_mean": 0.1394329380415394,
+      "wf_minus_adapt_prauc_mean": 0.13316681798848512,
       "wf_minus_adapt_prauc_ci_95": [
-        0.11000835775522594,
-        0.16947567242906367
+        0.10182089968762348,
+        0.16383344686255893
       ],
-      "ref_minus_adapt_prauc_mean": 0.14497846394607466,
+      "ref_minus_adapt_prauc_mean": 0.13385834103350475,
       "ref_minus_adapt_prauc_ci_95": [
-        0.11769474093252376,
-        0.17264345050877608
+        0.10055764662001318,
+        0.16549040965564635
       ],
-      "wf_minus_ref_prauc_mean": -0.005545525904535302,
+      "wf_minus_ref_prauc_mean": -0.0006915230450196392,
       "wf_minus_ref_prauc_ci_95": [
-        -0.012132357572198793,
-        7.267990812735337e-05
+        -0.005974515255447022,
+        0.004086333297468093
       ],
-      "wf_minus_adapt_f2_mean": 0.019103670661481217,
+      "wf_minus_adapt_f2_mean": 0.017350508820419344,
       "wf_minus_adapt_f2_ci_95": [
-        0.007445485085103132,
-        0.0329208371513378
+        0.00500465728869019,
+        0.03053125460194791
       ],
-      "ref_minus_adapt_f2_mean": 0.019462375726149724,
+      "ref_minus_adapt_f2_mean": 0.017551517245145625,
       "ref_minus_adapt_f2_ci_95": [
-        0.007067718624368624,
-        0.033915491599107714
+        0.005875468943384047,
+        0.02991251379175948
       ],
-      "wf_minus_ref_f2_mean": -0.0003587050646685055,
+      "wf_minus_ref_f2_mean": -0.00020100842472628243,
       "wf_minus_ref_f2_ci_95": [
-        -0.0032241121277281405,
-        0.002589494947081332
+        -0.0031462429155549726,
+        0.0026541548833268046
       ]
     }
   }

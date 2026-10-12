@@ -119,9 +119,24 @@ def train_logistic_regression(X_train, y_train, feature_names):
     return model, scaler
 
 
-def train_lightgbm_model(X_train, y_train, X_val, y_val, feature_names):
-    """Навчає LightGBM з ранньою зупинкою виключно на Validation вибірці."""
-    print(f"Навчання LightGBM ({len(feature_names)} ознак)...")
+def train_lightgbm_model(X_train, y_train, X_val=None, y_val=None, feature_names=None, es_days: int = 60, embargo_hours: int = 2):
+    """Навчає LightGBM з ранньою зупинкою на виділеному внутрішньому хронологічному спліті Train_ES
+    (останні es_days днів Train із 2-годинним embargo після Train_Fit), залишаючи Validation вибірку
+    100% недоторканою для калібрування порогу p* та вибору моделі за Val PR-AUC."""
+    print(f"Навчання LightGBM ({len(feature_names)} ознак, внутрішній Train_ES={es_days}д з embargo={embargo_hours}г)...")
+    t_max = X_train["timestamp_utc"].max()
+    es_start = t_max - pd.Timedelta(days=es_days)
+    fit_end = es_start - pd.Timedelta(hours=embargo_hours)
+
+    fit_mask = (X_train["timestamp_utc"] < fit_end).values
+    es_mask = (X_train["timestamp_utc"] >= es_start).values
+
+    y_train_arr = np.asarray(y_train)
+    X_fit = X_train.loc[fit_mask, feature_names]
+    y_fit = y_train_arr[fit_mask]
+    X_es = X_train.loc[es_mask, feature_names]
+    y_es = y_train_arr[es_mask]
+
     model = lgb.LGBMClassifier(
         n_estimators=300,
         learning_rate=0.05,
@@ -138,10 +153,10 @@ def train_lightgbm_model(X_train, y_train, X_val, y_val, feature_names):
     )
 
     model.fit(
-        X_train[feature_names],
-        y_train,
-        eval_set=[(X_val[feature_names], y_val)],
-        eval_names=["val"],
+        X_fit,
+        y_fit,
+        eval_set=[(X_es, y_es)],
+        eval_names=["train_es"],
         callbacks=[lgb.early_stopping(stopping_rounds=30, verbose=False)],
     )
     return model

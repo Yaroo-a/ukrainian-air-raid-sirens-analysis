@@ -235,10 +235,10 @@ def run_full_protocol_naive_as_is(fs_path: Path):
 
     def _status_label(m: str) -> str:
         if m == val_winner_model:
-            return "pre-specified winner (selected on Val by PR-AUC)"
+            return "selected on Val by PR-AUC (rule formulated after initial Test inspection)"
         if "Set C'" in m:
             return "post-hoc sensitivity experiment (Set C')"
-        return "pre-specified candidate"
+        return "candidate model (Val PR-AUC selection rule formulated after initial Test inspection)"
 
     df_val_res["selection_status"] = df_val_res["model"].map(_status_label)
     df_val_res.to_csv(vol_dir / "volunteer_ml_validation_benchmark.csv", index=False)
@@ -374,6 +374,8 @@ def run_full_protocol_naive_as_is(fs_path: Path):
         "recent_60d_rows": int(rec_mask.sum()),
         "recent_60d_positives": int(y_test[rec_mask].sum()),
         "recent_60d_base_rate": float(y_test[rec_mask].mean()),
+        "selection_rule": "arg max PR-AUC on Validation among candidate models (rule formulated after initial Test inspection) (Sets A, B, C)",
+        "early_stopping_subsplit": "Internal chronological split at tail of Train (last 60 days of Train with 2h embargo after Train_Fit; Val 100% untouched by early stopping)",
         "selected_model_on_val": val_winner_model,
         "paired_day_bootstrap_500_val": val_diffs,
         "paired_day_bootstrap_500_test": test_diffs,

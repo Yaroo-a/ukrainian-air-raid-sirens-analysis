@@ -138,11 +138,16 @@ def clean_and_profile_data(
 
     is_fin_raw = df["finished_at"].notna()
     dur_raw = (df["finished_at"] - df["started_at"]).dt.total_seconds()
-    glitch_mask = is_fin_raw & (dur_raw < min_duration_seconds)
+    # Каузальний фільтр мікро-тривог (< 60 с): відкидаємо лише ті короткі записи, чий відбій відбувся
+    # до настання чергової годинної точки прийняття рішення T (started_at.dt.ceil('h') == finished_at.dt.ceil('h')).
+    # Якщо тривога почалася до T і закінчилася після T (started_at <= T < finished_at), у момент T її майбутній
+    # час відбою ще невідомий, тому вона не може ретроспективно видалятися на основі майбутньої тривалості.
+    same_hour_window = df["started_at"].dt.ceil("h") == df["finished_at"].dt.ceil("h")
+    glitch_mask = is_fin_raw & (dur_raw < min_duration_seconds) & same_hour_window
     glitch_removed = int(glitch_mask.sum())
     df = df[~glitch_mask].copy()
     after_glitch_count = len(df)
-    print(f"   - Видалено технічних мікро-тривог (< {min_duration_seconds}с): {glitch_removed:,} | Залишилось: {after_glitch_count:,}")
+    print(f"   - Видалено каузальних технічних мікро-тривог (< {min_duration_seconds}с у межах години): {glitch_removed:,} | Залишилось: {after_glitch_count:,}")
 
     # 4. Відбір за рівнем: до 2025-08-01 — 'oblast', з 2025-08-01 — всі рівні ('oblast', 'raion', 'hromada')
     print(f"🔗 2. Побудова обласних тривог (до {SUBREGIONAL_TRANSITION_UTC.date()} level=='oblast', після — об'єднання з raion/hromada)...")
@@ -366,10 +371,16 @@ def clean_volunteer_data(
     before_train_start = int((df["started_at"] < train_start).sum())
     df = df[df["started_at"] >= train_start].copy()
 
-    # 4. Фільтрація технічних збоїв (< 60с або від'ємна тривалість) на сирих часових мітках
+    # 4. Фільтрація технічних збоїв (від'ємна тривалість або каузальні мікро-тривоги < 60с у межах години)
     is_fin = df["finished_at"].notna()
     dur_raw = (df["finished_at"] - df["started_at"]).dt.total_seconds()
-    glitch_mask = is_fin & (dur_raw < min_duration_seconds)
+    neg_mask = is_fin & (dur_raw < 0)
+    if int(neg_mask.sum()) > 0:
+        df = df[~neg_mask].copy()
+    is_fin = df["finished_at"].notna()
+    dur_raw = (df["finished_at"] - df["started_at"]).dt.total_seconds()
+    same_hour_window = df["started_at"].dt.ceil("h") == df["finished_at"].dt.ceil("h")
+    glitch_mask = is_fin & (dur_raw < min_duration_seconds) & same_hour_window
     glitch_removed = int(glitch_mask.sum())
     df = df[~glitch_mask].copy()
 

@@ -10,7 +10,7 @@
      (а) Official (`data/processed/ml_features_hourly.parquet`)
      (б) Volunteer (`data/processed/volunteer_ml_features_hourly_fixed_d.parquet`, каузальний варіант naive_fixed_D).
 2. Усі інші конфігурації позначені явно:
-   - `LogReg (Set C) [WF Rolling 12m]` — exploratory (pre-specified Set C)
+   - `LogReg (Set C) [WF Rolling 12m]` — exploratory (Set C under Val PR-AUC selection rule, formulated after initial Test inspection)
    - `Expanding Window (+ 2m Val)` — exploratory secondary window configuration
    - `Set D (Set C + Relative Ratios)` — post-hoc exploratory feature set (сконструйований після перегляду Test).
 3. Для кожного місяця M у Test (починаючи з 2025-06):
@@ -20,8 +20,9 @@
    - Навчальне вікно Train_M (з 2-годинним embargo перед Val_M):
      * Rolling 12m: [T_start(M) - 14 months, T_start(M) - 2 months - 2 hours]
      * Expanding:   [T_min, T_start(M) - 2 months - 2 hours]
-   - Жодного повторного перенавчання на Val_M немає: модель навчається на Train_M (з early stopping на Val_M),
-     поріг p*_M обирається на Val_M (максимізація F2) як для ML-моделей, так і для Adaptive 14-day бейзлайну.
+   - Всередині Train_M для LightGBM виділяється окремий хронологічний підспліт Train_M_ES (останні 30 діб Train_M
+     із 2-годинним embargo після Train_M_Fit) виключно для early_stopping(30), щоб Val_M залишався 100% поза циклом
+     навчання і використовувався виключно для підбору порогу p*_M (максимізація F2).
 4. Метрики:
    - Об'єднаний (pooled out-of-fold) PR-AUC з 95% Day-Block Bootstrap ДІ (N=500)
    - Середнє помісячних PR-AUC (`mean_monthly_pr_auc`)
@@ -197,8 +198,24 @@ def fit_fold_lightgbm(
     features: list[str],
     n_jobs: int = 4,
     random_state: int = 42,
+    es_days: int = 30,
+    embargo_hours: int = 2,
 ):
-    """Навчає LightGBM строго на X_train (early stopping на X_val) з тими самими гіперпараметрами, що в train_models.py."""
+    """Навчає LightGBM строго на внутрішньому спліті X_train (Train_M_Fit + 2h embargo + Train_M_ES для early stopping),
+    щоб калібрування порогу p*_M на X_val (Val_M) не використовувало ті самі спостереження, на яких зупинявся бустинг."""
+    t_max = X_train["timestamp_utc"].max()
+    es_start = t_max - pd.Timedelta(days=es_days)
+    fit_end = es_start - pd.Timedelta(hours=embargo_hours)
+
+    fit_mask = (X_train["timestamp_utc"] < fit_end).values
+    es_mask = (X_train["timestamp_utc"] >= es_start).values
+
+    y_train_arr = np.asarray(y_train)
+    X_fit = X_train.loc[fit_mask, features]
+    y_fit = y_train_arr[fit_mask]
+    X_es = X_train.loc[es_mask, features]
+    y_es = y_train_arr[es_mask]
+
     model = LGBMClassifier(
         n_estimators=300,
         learning_rate=0.05,
@@ -214,10 +231,10 @@ def fit_fold_lightgbm(
         verbosity=-1,
     )
     model.fit(
-        X_train[features],
-        y_train,
-        eval_set=[(X_val[features], y_val)],
-        eval_names=["val"],
+        X_fit,
+        y_fit,
+        eval_set=[(X_es, y_es)],
+        eval_names=["train_m_es"],
         callbacks=[early_stopping(stopping_rounds=30, verbose=False), log_evaluation(period=0)],
     )
     p_val = model.predict_proba(X_val[features])[:, 1]
@@ -649,27 +666,39 @@ def run_walk_forward_for_dataset(
             "b_pred_all": np.ones_like(y_te),
             "p_adapt": p_adapt,
             "b_adapt_static": (p_adapt >= static_adapt_th).astype(int),
+            "thr_adapt_static": float(static_adapt_th),
             "b_adapt_wf": (p_adapt >= wf_adapt_th).astype(int),
+            "thr_adapt_wf": float(wf_adapt_th),
             "p_stat_lgb_c": p_stat_lgb_c,
             "b_stat_lgb_c": (p_stat_lgb_c >= static_lgb_c_th).astype(int),
+            "thr_stat_lgb_c": float(static_lgb_c_th),
             "p_stat_lr_c": p_stat_lr_c,
             "b_stat_lr_c": (p_stat_lr_c >= static_lr_c_th).astype(int),
+            "thr_stat_lr_c": float(static_lr_c_th),
             "p_roll_lgb_c": p_roll_lgb_c,
             "b_roll_lgb_c": (p_roll_lgb_c >= roll_lgb_c_th).astype(int),
+            "thr_roll_lgb_c": float(roll_lgb_c_th),
             "p_roll_lr_c": p_roll_lr_c,
             "b_roll_lr_c": (p_roll_lr_c >= roll_lr_c_th).astype(int),
+            "thr_roll_lr_c": float(roll_lr_c_th),
             "p_roll_lgb_d": p_roll_lgb_d,
             "b_roll_lgb_d": (p_roll_lgb_d >= roll_lgb_d_th).astype(int),
+            "thr_roll_lgb_d": float(roll_lgb_d_th),
             "p_roll_lr_d": p_roll_lr_d,
             "b_roll_lr_d": (p_roll_lr_d >= roll_lr_d_th).astype(int),
+            "thr_roll_lr_d": float(roll_lr_d_th),
             "p_exp_lgb_c": p_exp_lgb_c,
             "b_exp_lgb_c": (p_exp_lgb_c >= exp_lgb_c_th).astype(int),
+            "thr_exp_lgb_c": float(exp_lgb_c_th),
             "p_exp_lr_c": p_exp_lr_c,
             "b_exp_lr_c": (p_exp_lr_c >= exp_lr_c_th).astype(int),
+            "thr_exp_lr_c": float(exp_lr_c_th),
             "p_exp_lgb_d": p_exp_lgb_d,
             "b_exp_lgb_d": (p_exp_lgb_d >= exp_lgb_d_th).astype(int),
+            "thr_exp_lgb_d": float(exp_lgb_d_th),
             "p_exp_lr_d": p_exp_lr_d,
             "b_exp_lr_d": (p_exp_lr_d >= exp_lr_d_th).astype(int),
+            "thr_exp_lr_d": float(exp_lr_d_th),
         }))
         print(
             f"   ✔ Місяць {m_str}: base_rate={base_rate_m:.3f} | >StaticMax={monthly_diag_rows[-1]['share_gt_static_train_max']:.1%} "
@@ -683,7 +712,7 @@ def run_walk_forward_for_dataset(
     oof_df = pd.concat(oof_chunks, ignore_index=True)
 
     stat_lgb_status = (
-        f"reference static model (Val winner, frozen {frozen_lgb_path.name})"
+        f"reference static model (selected by Val PR-AUC rule, frozen {frozen_lgb_path.name})"
     )
     stat_lr_status = (
         "reference static model (frozen logreg_adaptive.joblib)"
@@ -698,7 +727,7 @@ def run_walk_forward_for_dataset(
         ("LightGBM (Set C) [Static Initial Train]", "C (22 features)", stat_lgb_status),
         ("LogReg (Set C) [Static Initial Train]", "C (22 features)", stat_lr_status),
         ("LightGBM (Set C) [WF Rolling 12m]", "C (22 features)", "primary hypothesis of the WF block (specified after viewing static Test results)"),
-        ("LogReg (Set C) [WF Rolling 12m]", "C (22 features)", "exploratory (pre-specified Set C)"),
+        ("LogReg (Set C) [WF Rolling 12m]", "C (22 features)", "exploratory (Set C under Val PR-AUC selection rule, formulated after initial Test inspection)"),
         ("LightGBM (Set D: +Rel Ratios) [WF Rolling 12m, post-hoc]", "D (25 features, post-hoc)", "post-hoc exploratory (Set D)"),
         ("LogReg (Set D: +Rel Ratios) [WF Rolling 12m, post-hoc]", "D (25 features, post-hoc)", "post-hoc exploratory (Set D)"),
         ("LightGBM (Set C) [WF Expanding]", "C (22 features)", "exploratory (expanding window)"),
@@ -771,7 +800,7 @@ def run_walk_forward_for_dataset(
 
     elapsed_sec = round(time.perf_counter() - t0, 2)
 
-    # Збереження артефактів та Out-of-Fold прогнозів
+    # Збереження артефактів та Out-of-Fold прогнозів (усі моделі p_*, b_*, thr_* + сумісні аліаси)
     p_fx = f"{file_prefix}_" if file_prefix else ""
     monthly_csv = out_dir / f"{p_fx}walk_forward_monthly_metrics.csv"
     full_csv = out_dir / f"{p_fx}walk_forward_overall_benchmark.csv"
@@ -783,10 +812,47 @@ def run_walk_forward_for_dataset(
     oof_save_df = pd.DataFrame({
         "timestamp_utc": pd.to_datetime(oof_df["timestamp_utc"], utc=True),
         "oblast": oof_df["oblast"].astype(str),
+        "year_month_utc": oof_df["year_month_utc"].astype(str),
         "y": oof_df["y_true"].astype(np.int8),
         "p_adapt": oof_df["p_adapt"].astype(np.float64),
+        "b_adapt_static": oof_df["b_adapt_static"].astype(np.int8),
+        "thr_adapt_static": oof_df["thr_adapt_static"].astype(np.float64),
+        "b_adapt_wf": oof_df["b_adapt_wf"].astype(np.int8),
+        "thr_adapt_wf": oof_df["thr_adapt_wf"].astype(np.float64),
         "p_stat_lgb_c": oof_df["p_stat_lgb_c"].astype(np.float64),
+        "b_stat_lgb_c": oof_df["b_stat_lgb_c"].astype(np.int8),
+        "thr_stat_lgb_c": oof_df["thr_stat_lgb_c"].astype(np.float64),
+        "p_stat_lr_c": oof_df["p_stat_lr_c"].astype(np.float64),
+        "b_stat_lr_c": oof_df["b_stat_lr_c"].astype(np.int8),
+        "thr_stat_lr_c": oof_df["thr_stat_lr_c"].astype(np.float64),
         "p_roll_lgb_c": oof_df["p_roll_lgb_c"].astype(np.float64),
+        "b_roll_lgb_c": oof_df["b_roll_lgb_c"].astype(np.int8),
+        "thr_roll_lgb_c": oof_df["thr_roll_lgb_c"].astype(np.float64),
+        "p_roll_lr_c": oof_df["p_roll_lr_c"].astype(np.float64),
+        "b_roll_lr_c": oof_df["b_roll_lr_c"].astype(np.int8),
+        "thr_roll_lr_c": oof_df["thr_roll_lr_c"].astype(np.float64),
+        "p_roll_lgb_d": oof_df["p_roll_lgb_d"].astype(np.float64),
+        "b_roll_lgb_d": oof_df["b_roll_lgb_d"].astype(np.int8),
+        "thr_roll_lgb_d": oof_df["thr_roll_lgb_d"].astype(np.float64),
+        "p_roll_lr_d": oof_df["p_roll_lr_d"].astype(np.float64),
+        "b_roll_lr_d": oof_df["b_roll_lr_d"].astype(np.int8),
+        "thr_roll_lr_d": oof_df["thr_roll_lr_d"].astype(np.float64),
+        "p_exp_lgb_c": oof_df["p_exp_lgb_c"].astype(np.float64),
+        "b_exp_lgb_c": oof_df["b_exp_lgb_c"].astype(np.int8),
+        "thr_exp_lgb_c": oof_df["thr_exp_lgb_c"].astype(np.float64),
+        "p_exp_lr_c": oof_df["p_exp_lr_c"].astype(np.float64),
+        "b_exp_lr_c": oof_df["b_exp_lr_c"].astype(np.int8),
+        "thr_exp_lr_c": oof_df["thr_exp_lr_c"].astype(np.float64),
+        "p_exp_lgb_d": oof_df["p_exp_lgb_d"].astype(np.float64),
+        "b_exp_lgb_d": oof_df["b_exp_lgb_d"].astype(np.int8),
+        "thr_exp_lgb_d": oof_df["thr_exp_lgb_d"].astype(np.float64),
+        "p_exp_lr_d": oof_df["p_exp_lr_d"].astype(np.float64),
+        "b_exp_lr_d": oof_df["b_exp_lr_d"].astype(np.int8),
+        "thr_exp_lr_d": oof_df["thr_exp_lr_d"].astype(np.float64),
+        # Backward-compatible aliases
+        "p_lgbm_static": oof_df["p_stat_lgb_c"].astype(np.float64),
+        "p_lgbm_wf_rolling": oof_df["p_roll_lgb_c"].astype(np.float64),
+        "p_logreg_static": oof_df["p_stat_lr_c"].astype(np.float64),
     })
     oof_save_df.to_parquet(oof_parquet_path, index=False)
     oof_sha256 = hashlib.sha256(oof_parquet_path.read_bytes()).hexdigest()
@@ -823,19 +889,19 @@ def run_walk_forward_for_dataset(
                 "pooled_pr_auc = 0.3684 [0.360, 0.377] (delta_prauc_vs_adapt_wf = -0.0239 [-0.0285, -0.0194]) на повному Test та "
                 "0.4261 [0.415, 0.440] (delta_prauc_vs_adapt_wf = -0.0548 [-0.0641, -0.0449]) на останніх 60 днях. "
                 "Після суворого вирівнювання fit_fold_lightgbm до параметрів train_models.py (n_estimators=300, learning_rate=0.05, "
-                "num_leaves=31, max_depth=-1, min_child_samples=50, без class_weight='balanced', зі стандартним binary_logloss early stopping) "
-                "та переходу Static на заморожений volunteer_lightgbm_adaptive_fixed_d.joblib висновок на Volunteer змінився: "
-                "на повному Test (volunteer_walk_forward_overall_benchmark.csv) для LightGBM (Set C) [WF Rolling 12m] "
-                "pooled_pr_auc зріс до 0.4050468889682864 (0.4050 [0.397, 0.413]), а delta_prauc_vs_adapt_wf став статистично значущим: "
-                "+0.01277323959789397 (+0.0128 [+0.0082, +0.0168]); для LightGBM (Set C) [Static Initial Train] (fixed_d) "
-                "pooled_pr_auc становить 0.390230721659669 (0.3902 [0.383, 0.397]), delta_prauc_vs_adapt_wf = -0.0019152044766016757 "
-                "(-0.0019 [-0.0065, +0.0024]). На останніх 60 днях (volunteer_walk_forward_recent_60d_benchmark.csv) для "
-                "LightGBM (Set C) [WF Rolling 12m] pooled_pr_auc зріс до 0.49750844169332 (0.4975 [0.486, 0.512]), "
-                "delta_prauc_vs_adapt_wf = +0.016718345170182388 (+0.0167 [+0.0089, +0.0252]), а для Static Initial Train (fixed_d) "
-                "pooled_pr_auc становить 0.4546067304670379 (0.4546 [0.440, 0.472]), delta_prauc_vs_adapt_wf = -0.02624850710058918 "
-                "(-0.0262 [-0.0360, -0.0156]). Водночас за PR-AUC на Volunteer LightGBM WF Rolling 12m (0.4050) поступається "
-                "LogReg (Set C) [Static Initial Train] (0.40973998394841066, [0.401, 0.418], парна різниця LGBM_WF − LogReg_Static = "
-                "-0.004641689962824445 [-0.0081, -0.0013]) і перебуває на рівні LogReg (Set C) [WF Rolling 12m] (0.4057240668278464, [0.397, 0.414]). "
+                "num_leaves=31, max_depth=-1, min_child_samples=50, без class_weight='balanced', зі стандартним binary_logloss early stopping "
+                "на внутрішньому підвиділі Train_ES з 2-годинним embargo) та переходу Static на заморожений volunteer_lightgbm_adaptive_fixed_d.joblib "
+                "висновок на Volunteer змінився: на повному Test (volunteer_walk_forward_overall_benchmark.csv) для LightGBM (Set C) [WF Rolling 12m] "
+                "pooled_pr_auc становить 0.3997006181076793 (0.3997 [0.391, 0.407]), а delta_prauc_vs_adapt_wf є статистично значущим: "
+                "+0.007361836781352378 (+0.0074 [+0.0027, +0.0121]); для LightGBM (Set C) [Static Initial Train] (fixed_d) "
+                "pooled_pr_auc становить 0.386489711517043 (0.3865 [0.379, 0.394]), delta_prauc_vs_adapt_wf = -0.0056881821893382985 "
+                "(-0.0057 [-0.0095, -0.0016]). На останніх 60 днях (volunteer_walk_forward_recent_60d_benchmark.csv) для "
+                "LightGBM (Set C) [WF Rolling 12m] pooled_pr_auc становить 0.4913018432350895 (0.4913 [0.478, 0.507]), "
+                "delta_prauc_vs_adapt_wf = +0.010493026273977276 (+0.0105 [+0.0016, +0.0199]), а для Static Initial Train (fixed_d) "
+                "pooled_pr_auc становить 0.45790510421599974 (0.4579 [0.443, 0.476]), delta_prauc_vs_adapt_wf = -0.022935453339100994 "
+                "(-0.0229 [-0.0321, -0.0134]). Водночас за PR-AUC на Volunteer LightGBM WF Rolling 12m (0.3997) поступається "
+                "LogReg (Set C) [Static Initial Train] (0.4098184224975681, [0.401, 0.418], парна різниця LGBM_WF − LogReg_Static = "
+                "-0.010052281736511752 [-0.0137, -0.0064]) та LogReg (Set C) [WF Rolling 12m] (0.40580856593089326, [0.398, 0.414]). "
                 "Примітка: згадані в попередніх чернетках числа 0.4094 та 0.4793 (Δ = −0.0017) були взяті з пам'яті і не підтверджені жодним CSV чи логом прогонів."
             ),
             "causal_interpretation_caveat": (

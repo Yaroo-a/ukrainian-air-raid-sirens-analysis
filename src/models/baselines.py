@@ -37,7 +37,7 @@ from sklearn.metrics import (
 def evaluate_threshold_search(y_true, y_prob, thresholds=None):
     """Searches for optimal threshold maximizing F2 score."""
     if thresholds is None:
-        thresholds = np.linspace(0.01, 0.60, 150)
+        thresholds = np.linspace(0.01, 0.70, 175)
     best_th = 0.5
     best_f2 = -1.0
     best_p, best_r = 0, 0

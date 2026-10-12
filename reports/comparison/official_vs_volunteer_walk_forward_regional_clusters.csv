@@ -1,7 +1,7 @@
 dataset,train_cluster_label,n_oblasts,n_low_sample_oblasts,mean_base_rate,median_prauc_adapt,median_prauc_static_lgb_c,median_prauc_wf_roll12m_lgb_c,mean_delta_wf_minus_static,median_delta_wf_minus_static,mean_delta_wf_minus_adapt,median_delta_wf_minus_adapt,n_wf_gt_static,n_wf_gt_adapt
-Official,high_activity (активність 2022–04.2024),12,2,0.2908,0.31,0.346,0.3373,0.0494,0.0234,0.0908,0.0542,10,12
-Official,medium_activity (активність 2022–04.2024),5,0,0.0611,0.072,0.1592,0.1887,0.0265,0.0297,0.1167,0.1057,5,5
-Official,low_activity (активність 2022–04.2024),7,1,0.0174,0.0189,0.1321,0.1255,0.002,0.0033,0.1137,0.1066,4,7
-Volunteer (naive_fixed_D),high_activity (активність 2022–04.2024),10,0,0.2887,0.3156,0.3358,0.3474,0.0162,0.0111,0.0325,0.0383,7,10
-Volunteer (naive_fixed_D),medium_activity (активність 2022–04.2024),7,0,0.0989,0.1329,0.1907,0.1932,0.0097,0.0036,0.0525,0.0465,4,7
-Volunteer (naive_fixed_D),low_activity (активність 2022–04.2024),7,1,0.044,0.0224,0.069,0.0931,0.0061,0.0034,0.0292,0.0228,4,7
+Official,high_activity (активність 2022–04.2024),12,2,0.2908,0.31,0.3471,0.3393,0.0443,0.0186,0.0877,0.0504,11,12
+Official,medium_activity (активність 2022–04.2024),5,0,0.0611,0.072,0.1567,0.1812,0.0332,0.0349,0.1148,0.1028,5,5
+Official,low_activity (активність 2022–04.2024),7,1,0.0174,0.0189,0.1153,0.1281,0.0187,0.0187,0.1182,0.1091,7,7
+Volunteer (naive_fixed_D),high_activity (активність 2022–04.2024),10,0,0.2887,0.3156,0.33,0.3448,0.0189,0.0155,0.0299,0.0349,7,10
+Volunteer (naive_fixed_D),medium_activity (активність 2022–04.2024),7,0,0.0989,0.1329,0.1847,0.1872,0.0074,0.0033,0.0463,0.0435,5,7
+Volunteer (naive_fixed_D),low_activity (активність 2022–04.2024),7,1,0.044,0.0224,0.0714,0.0768,0.0029,0.0054,0.0253,0.0192,6,7
